@@ -2,6 +2,9 @@ package com.example.MatchaTonic.Back.controller;
 
 import com.example.MatchaTonic.Back.entity.login.User;
 import com.example.MatchaTonic.Back.repository.login.UserRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.HashMap;
 import java.util.Map;
 
+@Tag(name = "User", description = "사용자 정보 및 인증 관리 API")
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
@@ -21,8 +25,9 @@ public class UserController {
 
     private final UserRepository userRepository;
 
+    @Operation(summary = "로그인 유저 정보 조회 (SYS-01)", description = "현재 세션에 로그인된 사용자의 상세 정보를 반환합니다.")
     @GetMapping("/me")
-    public ResponseEntity<?> getCurrentUser(@AuthenticationPrincipal OAuth2User principal) {
+    public ResponseEntity<?> getCurrentUser(@Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal) {
 
         // 1. 로그인이 안 된 경우
         if (principal == null) {

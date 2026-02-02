@@ -6,6 +6,9 @@ import com.example.MatchaTonic.Back.entity.project.ProjectMember;
 import com.example.MatchaTonic.Back.repository.login.UserRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectMemberRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 
+@Tag(name = "Project", description = "프로젝트 생성 및 참여 관리 API")
 @RestController
 @RequestMapping("/api/projects")
 @RequiredArgsConstructor
@@ -25,10 +29,10 @@ public class ProjectController {
     private final UserRepository userRepository;
     private final ProjectMemberRepository projectMemberRepository;
 
-    // [PROJ-01] 새 프로젝트 생성
+    @Operation(summary = "새 프로젝트 생성 (PROJ-01)", description = "프로젝트 이름과 주제를 입력하여 새 프로젝트를 생성하고 팀장으로 등록됩니다.")
     @PostMapping
     public ResponseEntity<Object> createProject(
-            @AuthenticationPrincipal OAuth2User principal,
+            @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal,
             @RequestBody Map<String, String> request) {
 
         if (principal == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
@@ -56,10 +60,10 @@ public class ProjectController {
         return ResponseEntity.status(HttpStatus.CREATED).body((Object) response);
     }
 
-    // [PROJ-04] 초대 코드로 프로젝트 참여
+    @Operation(summary = "초대 코드로 프로젝트 참여 (PROJ-04)", description = "초대 코드를 검증하고 유효할 경우 해당 프로젝트의 팀원으로 등록합니다.")
     @PostMapping("/join")
     public ResponseEntity<Object> joinProject(
-            @AuthenticationPrincipal OAuth2User principal,
+            @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal,
             @RequestBody Map<String, String> request) {
 
         if (principal == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");

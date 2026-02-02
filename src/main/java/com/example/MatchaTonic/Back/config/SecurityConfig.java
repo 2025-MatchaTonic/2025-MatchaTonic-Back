@@ -48,7 +48,7 @@ public class SecurityConfig {
                         .requestMatchers("/ws-stomp/**").permitAll()
 
                         // 3. Swagger 등 개발 도구 허용
-                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/v3/api-docs/**","/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
 
                         // 4. 나머지 모든 요청은 인증 필요
                         .anyRequest().authenticated()
