@@ -17,7 +17,9 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Tag(name = "Project", description = "프로젝트 생성 및 참여 관리 API")
 @RestController
@@ -48,7 +50,6 @@ public class ProjectController {
 
         Project savedProject = projectRepository.save(project);
 
-        // 생성자(팀장)를 멤버 테이블에도 등록
         projectMemberRepository.save(ProjectMember.builder()
                 .user(user)
                 .project(savedProject)
@@ -68,25 +69,20 @@ public class ProjectController {
 
         if (principal == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
 
-        // 1. 초대 코드 유효성 검증
         String inviteCode = request.get("inviteCode");
-        Project project = projectRepository.findByInviteCode(inviteCode)
-                .orElse(null);
+        Project project = projectRepository.findByInviteCode(inviteCode).orElse(null);
 
         if (project == null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("유효하지 않은 초대 코드입니다.");
         }
 
-        // 2. 현재 유저 정보 가져오기
         String email = principal.getAttribute("email");
         User user = userRepository.findByEmail(email).orElseThrow();
 
-        // 3. 중복 참여 확인
         if (projectMemberRepository.findByUserAndProject(user, project).isPresent()) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body("이미 참여 중인 프로젝트입니다.");
         }
 
-        // 4. 팀원으로 등록 [PROJ-04]
         projectMemberRepository.save(ProjectMember.builder()
                 .user(user)
                 .project(project)
@@ -99,5 +95,53 @@ public class ProjectController {
         response.put("status", "SUCCESS");
 
         return ResponseEntity.ok((Object) response);
+    }
+
+    @Operation(summary = "참여 중인 프로젝트 목록 조회 (HOME-01)", description = "로그인한 사용자가 참여 중인 모든 프로젝트의 목록을 조회합니다.")
+    @GetMapping("/me")
+    public ResponseEntity<Object> getMyProjects(@Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal) {
+        if (principal == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
+
+        String email = principal.getAttribute("email");
+        User user = userRepository.findByEmail(email).orElseThrow();
+
+        // ProjectMember 테이블을 통해 유저가 속한 프로젝트 리스트를 가져옴
+        List<ProjectMember> memberships = projectMemberRepository.findByUser(user);
+
+        List<Map<String, Object>> projectList = memberships.stream().map(member -> {
+            Map<String, Object> details = new HashMap<>();
+            details.put("projectId", member.getProject().getId());
+            details.put("name", member.getProject().getName());
+            details.put("role", member.getRole());
+            details.put("status", member.getProject().getStatus());
+            details.put("inviteCode", member.getProject().getInviteCode());
+            return details;
+        }).collect(Collectors.toList());
+
+        return ResponseEntity.ok((Object) projectList);
+    }
+
+    @Operation(summary = "팀원 목록 조회 (HOME-04)", description = "특정 프로젝트에 참여 중인 모든 팀원의 목록을 조회합니다.")
+    @GetMapping("/{projectId}/members")
+    public ResponseEntity<Object> getProjectMembers(
+            @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal,
+            @PathVariable Long projectId) {
+
+        if (principal == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
+
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
+
+        List<ProjectMember> members = projectMemberRepository.findByProject(project);
+
+        List<Map<String, Object>> memberList = members.stream().map(member -> {
+            Map<String, Object> details = new HashMap<>();
+            details.put("name", member.getUser().getName());
+            details.put("email", member.getUser().getEmail());
+            details.put("role", member.getRole());
+            return details;
+        }).collect(Collectors.toList());
+
+        return ResponseEntity.ok((Object) memberList);
     }
 }
