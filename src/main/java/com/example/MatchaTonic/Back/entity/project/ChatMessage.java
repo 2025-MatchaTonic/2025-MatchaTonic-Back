@@ -37,6 +37,6 @@ public class ChatMessage {
     private LocalDateTime timestamp;
 
     public enum MessageType {
-        TALK, SYSTEM
+        TALK, SYSTEM, ENTER
     }
 }

@@ -2,6 +2,8 @@ package com.example.MatchaTonic.Back.dto;
 
 import lombok.*;
 
+import java.time.LocalDateTime;
+
 @Getter
 @Setter
 @Builder
@@ -18,4 +20,5 @@ public class ChatMessageDto {
     private String senderEmail;
     private String senderName;
     private String message;
+    private LocalDateTime createdAt;
 }
