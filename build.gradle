@@ -15,7 +15,6 @@ java {
 
 repositories {
 	mavenCentral()
-	// Snapshot 저장소는 이제 지워도 됩니다.
 }
 
 dependencies {
@@ -44,6 +43,9 @@ dependencies {
 
 	// swagger
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
+
+	// WebSocket
+	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 }
 
 tasks.named('test') {
