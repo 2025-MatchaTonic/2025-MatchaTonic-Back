@@ -29,6 +29,7 @@ jobs:
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -61,16 +62,17 @@ jobs:
             docker pull ${{ env.ECR_REPOSITORY_URL }}:latest
 
             # 3. 기존 컨테이너 중지 및 삭제
-            docker stop molva-app || true
-            docker rm molva-app || true
+            docker stop matcha-app || true
+            docker rm matcha-app || true
 
             # 4. 새로운 컨테이너 실행
-            docker run -d --name molva-app -p 8080:8080 \
+            docker run -d --name matcha-app -p 8080:8080 \
               -e SPRING_DATASOURCE_URL="${{ secrets.SPRING_DATASOURCE_URL }}" \
               -e SPRING_DATASOURCE_USERNAME="${{ secrets.SPRING_DATASOURCE_USERNAME }}" \
               -e SPRING_DATASOURCE_PASSWORD="${{ secrets.SPRING_DATASOURCE_PASSWORD }}" \
               -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
               -e GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
+              -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
               -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
               -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
               -e AWS_REGION="${{ secrets.AWS_REGION }}" \
