@@ -26,7 +26,7 @@ public class ProjectController {
     private final ProjectService projectService;
     private final UserRepository userRepository;
 
-    @Operation(summary = "새 프로젝트 생성 (PROJ-01)")
+    @Operation(summary = "새 프로젝트 생성 (PROJ-01, PROJ-02)")
     @PostMapping
     public ResponseEntity<ProjectDto.CreateResponse> createProject(
             @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal,
@@ -35,6 +35,16 @@ public class ProjectController {
         User user = getUserFromPrincipal(principal);
         ProjectDto.CreateResponse response = projectService.createProject(request, user);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @Operation(summary = "내 프로젝트 목록 조회 (HOME-01, HOME-02)")
+    @GetMapping("/me")
+    public ResponseEntity<List<ProjectDto.CreateResponse>> getMyProjects(
+            @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal) {
+
+        User user = getUserFromPrincipal(principal);
+        List<ProjectDto.CreateResponse> response = projectService.getMyProjects(user);
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "초대 코드로 프로젝트 참여 (PROJ-04)")

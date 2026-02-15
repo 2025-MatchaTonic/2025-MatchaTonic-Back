@@ -5,7 +5,6 @@ import com.example.MatchaTonic.Back.dto.ProjectDto;
 import com.example.MatchaTonic.Back.entity.login.User;
 import com.example.MatchaTonic.Back.entity.project.Project;
 import com.example.MatchaTonic.Back.entity.project.ProjectMember;
-import com.example.MatchaTonic.Back.repository.login.UserRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectMemberRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
 import lombok.RequiredArgsConstructor;
@@ -42,9 +41,25 @@ public class ProjectService {
 
         return ProjectDto.CreateResponse.builder()
                 .projectId(savedProject.getId())
+                .name(savedProject.getName())
                 .inviteCode(savedProject.getInviteCode())
                 .status(savedProject.getStatus())
+                .chatRoomId(savedProject.getId())
                 .build();
+    }
+
+    // [HOME-01] 내 프로젝트 목록 조회
+    @Transactional(readOnly = true)
+    public List<ProjectDto.CreateResponse> getMyProjects(User user) {
+        return projectMemberRepository.findByUser(user).stream()
+                .map(member -> ProjectDto.CreateResponse.builder()
+                        .projectId(member.getProject().getId())
+                        .name(member.getProject().getName())
+                        .inviteCode(member.getProject().getInviteCode())
+                        .status(member.getProject().getStatus())
+                        .chatRoomId(member.getProject().getId())
+                        .build())
+                .collect(Collectors.toList());
     }
 
     // [PROJ-04] 초대 코드로 가입 로직
