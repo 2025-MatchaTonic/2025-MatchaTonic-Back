@@ -18,9 +18,20 @@ public class ProjectDto {
     @Getter
     @Builder
     public static class CreateResponse {
-        private String name;
         private Long projectId;
+        private String name;
         private String inviteCode;
+        private String status;
+        private Long chatRoomId;
+    }
+
+    @Getter
+    @Builder
+    public static class ListResponse {
+        private Long id;
+        private String name;
+        private String subject;
+        private String role;
         private String status;
         private Long chatRoomId;
     }

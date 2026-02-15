@@ -39,12 +39,11 @@ public class ProjectController {
 
     @Operation(summary = "내 프로젝트 목록 조회 (HOME-01, HOME-02)")
     @GetMapping("/me")
-    public ResponseEntity<List<ProjectDto.CreateResponse>> getMyProjects(
+    public ResponseEntity<List<ProjectDto.ListResponse>> getMyProjects(
             @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal) {
 
         User user = getUserFromPrincipal(principal);
-        List<ProjectDto.CreateResponse> response = projectService.getMyProjects(user);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(projectService.getMyProjects(user));
     }
 
     @Operation(summary = "초대 코드로 프로젝트 참여 (PROJ-04)")

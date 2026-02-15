@@ -32,7 +32,6 @@ public class ProjectService {
 
         Project savedProject = projectRepository.save(project);
 
-        // 팀장도 멤버 테이블에 등록 (Role: LEADER)
         projectMemberRepository.save(ProjectMember.builder()
                 .user(leader)
                 .project(savedProject)
@@ -50,14 +49,15 @@ public class ProjectService {
 
     // [HOME-01] 내 프로젝트 목록 조회
     @Transactional(readOnly = true)
-    public List<ProjectDto.CreateResponse> getMyProjects(User user) {
+    public List<ProjectDto.ListResponse> getMyProjects(User user) {
         return projectMemberRepository.findByUser(user).stream()
-                .map(member -> ProjectDto.CreateResponse.builder()
-                        .projectId(member.getProject().getId())
-                        .name(member.getProject().getName())
-                        .inviteCode(member.getProject().getInviteCode())
-                        .status(member.getProject().getStatus())
-                        .chatRoomId(member.getProject().getId())
+                .map(pm -> ProjectDto.ListResponse.builder()
+                        .id(pm.getProject().getId())
+                        .name(pm.getProject().getName())
+                        .subject(pm.getProject().getSubject())
+                        .role(pm.getRole())
+                        .status(pm.getProject().getStatus())
+                        .chatRoomId(pm.getProject().getId())
                         .build())
                 .collect(Collectors.toList());
     }
