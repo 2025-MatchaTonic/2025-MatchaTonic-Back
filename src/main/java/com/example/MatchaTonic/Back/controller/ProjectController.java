@@ -1,9 +1,11 @@
 package com.example.MatchaTonic.Back.controller;
 
+import com.example.MatchaTonic.Back.dto.ExportDto;
 import com.example.MatchaTonic.Back.dto.MemberDto;
 import com.example.MatchaTonic.Back.dto.ProjectDto;
 import com.example.MatchaTonic.Back.entity.login.User;
 import com.example.MatchaTonic.Back.repository.login.UserRepository;
+import com.example.MatchaTonic.Back.service.NotionService;
 import com.example.MatchaTonic.Back.service.ProjectService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -15,6 +17,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
+
 import java.util.List;
 
 @Tag(name = "Project", description = "프로젝트 관리 API")
@@ -25,6 +28,7 @@ public class ProjectController {
 
     private final ProjectService projectService;
     private final UserRepository userRepository;
+    private final NotionService notionService;
 
     @Operation(summary = "새 프로젝트 생성 (PROJ-01, PROJ-02)")
     @PostMapping
@@ -67,5 +71,16 @@ public class ProjectController {
         if (principal == null) throw new RuntimeException("인증 정보가 없습니다.");
         String email = principal.getAttribute("email");
         return userRepository.findByEmail(email).orElseThrow(() -> new RuntimeException("유저를 찾을 수 없습니다."));
+    }
+
+
+    @Operation(summary = "노션으로 내보내기 (EXP-01, 02)")
+    @PostMapping("/{projectId}/export")
+    public ResponseEntity<String> exportToNotion(
+            @PathVariable Long projectId,
+            @RequestBody ExportDto exportDto) {
+
+        String result = notionService.exportToNotion(projectId, exportDto.getNotionToken(), exportDto.getParentPageId());
+        return ResponseEntity.ok(result);
     }
 }
