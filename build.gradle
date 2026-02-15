@@ -46,6 +46,10 @@ dependencies {
 
 	// WebSocket
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
+	// Notion API SDK
+	implementation 'javaslang:javaslang:2.0.6'
+	implementation 'com.remoteapi:notion-sdk-java:1.3.2'
 }
 
 tasks.named('test') {
