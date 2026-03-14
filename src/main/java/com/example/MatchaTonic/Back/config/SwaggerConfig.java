@@ -19,8 +19,10 @@ public class SwaggerConfig {
                         .description("졸업 프로젝트 Promate의 백엔드 API 문서입니다.")
                         .version("v1.0.0"))
                 .servers(List.of(
-                        new Server().url("http://localhost:8080").description("Local Server"),
-                        new Server().url("http://13.209.17.73:8080").description("Production Server")
+                        // 1. 도메인 서버
+                        new Server().url("https://promate.ai.kr").description("Production Server (Domain)"),
+                        // 2. 로컬 테스트용
+                        new Server().url("http://localhost:8080").description("Local Server")
                 ));
     }
 }

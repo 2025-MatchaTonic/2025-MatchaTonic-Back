@@ -41,7 +41,7 @@ public class SecurityConfig {
 
                 .authorizeHttpRequests(auth -> auth
                         // 1. 공통 허용 경로
-                        .requestMatchers("/", "/login/**", "/oauth2/**").permitAll()
+                        .requestMatchers("/", "/login/**", "/oauth2/**","/health").permitAll()
                         .requestMatchers("/api/users/**").permitAll()
 
                         // 2. 프로젝트 채팅(WebSocket) 연결 주소 허용
@@ -79,7 +79,13 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(true);
-        config.setAllowedOriginPatterns(List.of("*")); // 실제 배포 시에는 도메인 지정 권장
+
+        config.setAllowedOriginPatterns(List.of(
+                "http://localhost:3000",       // 로컬 프론트
+                "https://promate.ai.kr",      // 운영 도메인
+                "http://promate.ai.kr"        // 리디렉션 전 접속 대비
+        ));
+
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("*"));
