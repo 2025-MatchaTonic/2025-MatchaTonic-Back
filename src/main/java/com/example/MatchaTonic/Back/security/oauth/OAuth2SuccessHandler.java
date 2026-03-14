@@ -22,14 +22,17 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication)
             throws IOException {
         OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
+
+        // 구글에서 넘겨준 이메일 정보 가져오기
         String email = (String) oAuth2User.getAttributes().get("email");
 
+        // JWT 토큰 생성
         String token = jwtTokenProvider.createToken(email, "ROLE_USER");
 
-        // 프론트엔드 주소로 토큰과 함께 리다이렉트
-        String targetUrl = UriComponentsBuilder.fromUriString("http://localhost:3000/oauth2/redirect")
+        String targetUrl = UriComponentsBuilder.fromUriString("https://promate.ai.kr/oauth2/redirect")
                 .queryParam("token", token)
                 .build().toUriString();
+
 
         getRedirectStrategy().sendRedirect(request, response, targetUrl);
     }
