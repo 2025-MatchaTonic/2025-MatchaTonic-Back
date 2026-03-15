@@ -1,16 +1,17 @@
 package com.example.MatchaTonic.Back.dto;
 
 import com.example.MatchaTonic.Back.entity.manual.Manual;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 public class ManualResponseDto {
+
     private Long id;
     private String title;
     private String content;
@@ -18,7 +19,7 @@ public class ManualResponseDto {
     private String category;
     private int stepOrder;
 
-    // Entity -> DTO 변환용 생성자
+    // Entity -> DTO
     public ManualResponseDto(Manual manual) {
         if (manual != null) {
             this.id = manual.getId();

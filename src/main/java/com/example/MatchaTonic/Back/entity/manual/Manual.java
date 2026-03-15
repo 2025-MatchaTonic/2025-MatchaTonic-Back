@@ -28,6 +28,7 @@ public class Manual {
     @Column(nullable = false)
     private String category;
 
+    @Column(nullable = false)
     private int stepOrder;
 
     @Builder
