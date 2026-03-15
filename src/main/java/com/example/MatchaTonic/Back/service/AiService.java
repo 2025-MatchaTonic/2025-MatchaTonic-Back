@@ -23,7 +23,7 @@ public class AiService {
     private final NotionService notionService;
     private final RestTemplate restTemplate;
 
-    @Value("${external.api.fastapi.url:http://43.200.181.53:8000/ai/generate}")
+    @Value("${external.api.fastapi.url}")
     private String fastApiUrl;
 
     public void processAndExport(ExportRequestDto request) {

@@ -33,7 +33,6 @@ public class ChatService {
 
     @Value("${external.api.fastapi.url}")
     private String aiChatUrl;
-
     @Transactional
     public void saveAndSendMessage(ChatMessageDto dto) {
         Project project = projectRepository.findById(dto.getProjectId())
