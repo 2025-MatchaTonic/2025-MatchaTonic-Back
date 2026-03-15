@@ -1,5 +1,7 @@
 package com.example.MatchaTonic.Back.service;
 
+import com.example.MatchaTonic.Back.dto.AiChatRequestDto;
+import com.example.MatchaTonic.Back.dto.AiChatResponseDto;
 import com.example.MatchaTonic.Back.dto.ChatMessageDto;
 import com.example.MatchaTonic.Back.entity.login.User;
 import com.example.MatchaTonic.Back.entity.project.ChatMessage;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,58 +34,73 @@ public class ChatService {
     private final SimpMessageSendingOperations messagingTemplate;
     private final RestTemplate restTemplate;
 
-    @Value("${external.api.fastapi.url}")
+    @Value("${external.api.fastapi.chat-url}")
     private String aiChatUrl;
+
     @Transactional
     public void saveAndSendMessage(ChatMessageDto dto) {
         Project project = projectRepository.findById(dto.getProjectId())
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
 
-        // 1. DB에 메시지 저장
+        // 1. DB에 메시지 저장 (ENTER 타입 제외)
         if (!ChatMessageDto.MessageType.ENTER.equals(dto.getType())) {
             saveToDb(dto, project);
         }
 
-        // 2. 실시간 브로드캐스팅 (사용자 메시지 전송)
+        // 2. 실시간 브로드캐스팅 (사용자 메시지)
         messagingTemplate.convertAndSend("/sub/chat/room/" + dto.getProjectId(), dto);
 
-        // 3. 사용자가 메시지를 보냈을 때만 AI 응답 호출
+        // 3. 사용자 메시지(TALK)일 경우 AI 응답 호출
         if (ChatMessageDto.MessageType.TALK.equals(dto.getType())) {
-            callAiAndReply(dto, project);
+            callAiAndBroadcast(project, dto);
         }
     }
 
-    // AI 서버(FastAPI) 호출 및 답변 전송
-    private void callAiAndReply(ChatMessageDto userDto, Project project) {
+    private void callAiAndBroadcast(Project project, ChatMessageDto userDto) {
         try {
-            // AI 서버 전송용 데이터 조립 (AI 서버 규격에 맞춤)
-            Map<String, Object> aiRequest = new HashMap<>();
-            aiRequest.put("projectId", project.getId());
-            aiRequest.put("content", userDto.getMessage());
-            aiRequest.put("currentStatus", project.getStatus());
+            // 대화 내역 조회
+            List<String> recentMessages = chatMessageRepository
+                    .findByProjectIdOrderByTimestampAsc(project.getId())
+                    .stream()
+                    .map(ChatMessage::getMessage)
+                    .filter(msg -> msg != null && !msg.isBlank())
+                    .collect(Collectors.toList());
+
+            // AI 서버 전송용 데이터 조립 (collectedData 포함)
+            Map<String, String> collectedData = new HashMap<>();
+            collectedData.put("title", project.getName() != null ? project.getName() : "");
+            collectedData.put("goal", project.getSubject() != null ? project.getSubject() : "");
+            collectedData.put("dueDate", project.getCreatedAt() != null ?
+                    project.getCreatedAt().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) : "");
+
+            AiChatRequestDto request = new AiChatRequestDto(
+                    project.getId(),
+                    userDto.getMessage(),
+                    "CHAT",
+                    "EXPLORE",
+                    collectedData,
+                    recentMessages,
+                    userDto.getMessage(),
+                    recentMessages
+            );
 
             // AI 서버 호출 (POST /ai/chat/)
-            String chatApiUrl = aiChatUrl.replace("/generate", "/chat/");
-            Map<String, Object> aiResponse = restTemplate.postForObject(chatApiUrl, aiRequest, Map.class);
+            AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
-            if (aiResponse != null && aiResponse.get("content") != null) {
-                String aiReplyMessage = (String) aiResponse.get("content");
-
-                // AI 응답 DTO 생성
+            if (response != null && response.content() != null) {
                 ChatMessageDto aiDto = ChatMessageDto.builder()
-                        .type(ChatMessageDto.MessageType.TALK)
+                        .type(ChatMessageDto.MessageType.SYSTEM)
                         .projectId(project.getId())
                         .senderName("Promate AI")
-                        .message(aiReplyMessage)
+                        .message(response.content())
                         .build();
 
-                // DB 저장 및 브로드캐스팅 (AI 메시지도 채팅방에 뿌림)
+                // DB 저장 및 실시간 전송 (AI 응답)
                 saveToDb(aiDto, project);
                 messagingTemplate.convertAndSend("/sub/chat/room/" + project.getId(), aiDto);
             }
         } catch (Exception e) {
             log.error("AI 채팅 응답 호출 실패: {}", e.getMessage());
-            // 실패 시 사용자에게 오류 메시지를 보내지 않고 로그만 남김 (채팅 흐름 방해 방지)
         }
     }
 
@@ -102,7 +120,6 @@ public class ChatService {
         chatMessageRepository.save(chatMessage);
     }
 
-    // [CHAT-04]
     @Transactional
     public void checkSubjectAndInitiateAI(Long projectId) {
         Project project = projectRepository.findById(projectId)

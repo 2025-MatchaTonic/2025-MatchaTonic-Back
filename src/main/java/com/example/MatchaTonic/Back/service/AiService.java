@@ -27,11 +27,11 @@ public class AiService {
     private String fastApiUrl;
 
     public void processAndExport(ExportRequestDto request) {
-        // 1. 기초 데이터 조회 (Project Meta Data)
+        // 1. 기초 데이터 조회
         Project project = projectRepository.findById(request.projectId())
                 .orElseThrow(() -> new RuntimeException("해당 프로젝트를 찾을 수 없습니다. ID: " + request.projectId()));
 
-        // 2. AI 서버 전송용 Payload 조립 (정규화 로직)
+        // 2. AI 서버 전송용 Payload 조립
         Map<String, Object> aiRequestPayload = createAiRequestPayload(project, request);
 
         AiResponseDto aiResponse;
@@ -39,7 +39,7 @@ public class AiService {
         try {
             log.info("FastAPI 분석 요청 시작 - ProjectID: {}, Endpoint: {}", request.projectId(), fastApiUrl);
 
-            // 3. FastAPI 호출 (조립된 Payload 전달)
+            // 3. FastAPI 호출
             aiResponse = restTemplate.postForObject(fastApiUrl, aiRequestPayload, AiResponseDto.class);
 
             if (aiResponse == null || aiResponse.templates() == null || aiResponse.templates().isEmpty()) {
@@ -55,7 +55,7 @@ public class AiService {
             throw new RuntimeException("AI 분석 처리 중 오류가 발생했습니다.");
         }
 
-        // 4. NotionService 호출 (사용자가 입력한 토큰과 URL 사용)
+        // 4. NotionService 호출
         try {
             log.info("노션 내보내기 시작 - Project: {}, Target URL: {}", project.getName(), request.pageUrl());
             notionService.createProjectPagesOnNotion(aiResponse, request.notionToken(), request.pageUrl());
@@ -65,17 +65,14 @@ public class AiService {
         }
     }
 
-    // AI 서버 요구사항에 맞게 Payload를 조립하는 메서드
     private Map<String, Object> createAiRequestPayload(Project project, ExportRequestDto request) {
         Map<String, Object> payload = new HashMap<>();
 
-        // 기본 정보
         payload.put("projectId", project.getId());
         payload.put("templateType", request.templateType() != null ? request.templateType() : "plan");
         payload.put("currentStatus", project.getStatus() != null ? project.getStatus() : "READY");
         payload.put("content", request.content() != null ? request.content() : "템플릿 생성 요청");
 
-        // collectedData 매핑 (표준 키 준수)
         Map<String, String> collectedData = new HashMap<>();
         collectedData.put("title", project.getName());
         collectedData.put("goal", project.getSubject() != null ? project.getSubject() : "");
@@ -85,8 +82,6 @@ public class AiService {
         collectedData.put("dueDate", project.getCreatedAt() != null ? project.getCreatedAt().toString() : "");
 
         payload.put("collectedData", collectedData);
-
-
         payload.put("recentMessages", request.selectedAnswers());
         payload.put("selectedAnswers", request.selectedAnswers());
 
