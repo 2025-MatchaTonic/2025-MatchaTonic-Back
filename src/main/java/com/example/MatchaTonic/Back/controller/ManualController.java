@@ -16,7 +16,6 @@ public class ManualController {
 
     private final ManualRepository manualRepository;
 
-    // 매뉴얼 조회 API
     @GetMapping
     public List<ManualResponseDto> getManuals(
             @RequestParam(name = "version", defaultValue = "PLAN") String version,
@@ -35,16 +34,21 @@ public class ManualController {
                 .collect(Collectors.toList());
     }
 
-    // 메뉴얼 등록 API (데이터 입력용)
-
     @PostMapping
     public ManualResponseDto saveManual(@RequestBody ManualResponseDto dto) {
+        // 터미널에 null로 찍히는지 확인용
+        System.out.println("DEBUG: 등록 시도 title = " + dto.getTitle());
+
+        if (dto.getTitle() == null) {
+            throw new IllegalArgumentException("데이터가 정상적으로 전달되지 않았습니다.");
+        }
+
         Manual manual = Manual.builder()
                 .title(dto.getTitle())
                 .content(dto.getContent())
                 .target(dto.getTarget())
                 .category(dto.getCategory())
-                .stepOrder(0)
+                .stepOrder(dto.getStepOrder())
                 .build();
 
         Manual savedManual = manualRepository.save(manual);

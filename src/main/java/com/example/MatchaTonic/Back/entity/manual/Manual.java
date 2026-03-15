@@ -20,13 +20,13 @@ public class Manual {
     private String title;
 
     @Column(columnDefinition = "TEXT", nullable = false)
-    private String content; // 마크다운 본문
+    private String content;
 
     @Column(nullable = false)
-    private String target; // "PLAN" (기획용), "DEV" (개발용)
+    private String target;
 
     @Column(nullable = false)
-    private String category; // "BACKEND", "FRONTEND", "PLANNING", "ALL" 또는 "BACKEND,FRONTEND"
+    private String category;
 
     private int stepOrder;
 
