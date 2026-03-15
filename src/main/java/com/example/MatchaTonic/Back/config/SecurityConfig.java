@@ -56,6 +56,7 @@ public class SecurityConfig {
                         // 1. 인증 없이 접근 가능한 경로 (로그인, 건강검진, 소셜 로그인 등)
                         .requestMatchers("/", "/login/**", "/oauth2/**", "/health").permitAll()
                         .requestMatchers("/api/users/**").permitAll()
+                        .requestMatchers("/api/manuals/**").permitAll()
 
                         // 2. 웹소켓 연결 경로 허용
                         .requestMatchers("/ws-stomp/**").permitAll()
