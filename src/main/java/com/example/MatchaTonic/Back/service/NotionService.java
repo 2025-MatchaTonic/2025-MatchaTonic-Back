@@ -4,12 +4,13 @@ import com.example.MatchaTonic.Back.dto.AiResponseDto;
 import com.example.MatchaTonic.Back.entity.project.Project;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -18,18 +19,26 @@ public class NotionService {
 
     private final RestTemplate restTemplate;
 
-    // fast api 배포시 환경변수로 관리할 예정
-    @Value("${notion.api.token:YOUR_DEFAULT_TOKEN}")
-    private String notionToken;
-
-    @Value("${notion.api.root-page-id:YOUR_DEFAULT_ROOT_ID}")
-    private String rootParentPageId;
-
-    public void createProjectPagesOnNotion(Project project, AiResponseDto aiResponse) {
+    /**
+     * 노션 페이지 생성 메인 로직
+     * @param aiResponse AI가 생성한 템플릿 리스트
+     * @param userToken 사용자가 직접 입력한 노션 통합 토큰
+     * @param pageUrl 사용자가 직접 입력한 부모 페이지 URL
+     */
+    public void createProjectPagesOnNotion(AiResponseDto aiResponse, String userToken, String pageUrl) {
         if (aiResponse == null || aiResponse.templates() == null) {
             log.error("AI 응답 데이터가 비어있어 노션 생성을 중단합니다.");
             return;
         }
+
+        // 1. URL에서 32자리 Page ID 추출
+        String rootParentPageId = extractPageId(pageUrl);
+        if (rootParentPageId == null) {
+            log.error("유효하지 않은 노션 URL입니다. ID를 추출할 수 없습니다: {}", pageUrl);
+            throw new IllegalArgumentException("유효한 노션 페이지 URL을 입력해주세요.");
+        }
+
+        log.info("추출된 Root Page ID: {}", rootParentPageId);
 
         Map<String, String> pageKeyToIdMap = new HashMap<>();
 
@@ -45,7 +54,8 @@ public class NotionService {
                     parentId = rootParentPageId;
                 }
 
-                String createdPageId = callNotionApi(notionToken, parentId, template);
+                // 사용자가 전달한 토큰을 사용하여 호출
+                String createdPageId = callNotionApi(userToken, parentId, template);
                 if (createdPageId != null) {
                     pageKeyToIdMap.put(template.key(), createdPageId);
                 }
@@ -53,6 +63,26 @@ public class NotionService {
                 log.error("템플릿 생성 중 개별 오류 발생 (건너뜀) - Key: {}, Error: {}", template.key(), e.getMessage());
             }
         }
+    }
+
+    /**
+     * 노션 URL에서 32자리 Page ID를 추출하는 유틸리티 메서드
+     */
+    public String extractPageId(String url) {
+        if (url == null || url.isEmpty()) return null;
+
+        // 패턴 설명: 마지막 하이픈(-) 뒤 혹은 마지막 슬래시(/) 뒤의 32자리 hex 문자열을 찾음
+        // 물음표(?) 뒤의 파라미터는 무시
+        Pattern pattern = Pattern.compile("([a-f0-9]{32})");
+
+        // URL에서 쿼리 스트링 제거
+        String cleanUrl = url.split("\\?")[0];
+        Matcher matcher = pattern.matcher(cleanUrl);
+
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
     }
 
     private String callNotionApi(String token, String parentId, AiResponseDto.TemplateDto template) {
@@ -71,7 +101,6 @@ public class NotionService {
         List<Map<String, Object>> children = new ArrayList<>();
         parseContentToBlocks(template.content(), children);
 
-        // 노션 API 제약: children 블록이 너무 많으면 에러가 날 수 있으므로 체크
         if (!children.isEmpty()) {
             body.put("children", children);
         }
@@ -84,8 +113,8 @@ public class NotionService {
             }
             return null;
         } catch (Exception e) {
-            log.error("노션 API 호출 실패: {}", e.getMessage());
-            return null; // 한 페이지가 실패해도 전체가 터지지 않게 null 반환
+            log.error("노션 API 호출 실패 (토큰 확인 필요): {}", e.getMessage());
+            return null;
         }
     }
 
@@ -116,7 +145,6 @@ public class NotionService {
         }
     }
 
-    // --- 기본 구조 유지 (Helper Methods) ---
     private Map<String, Object> createHeadingBlock(String text) {
         return Map.of("object", "block", "type", "heading_3",
                 "heading_3", Map.of("rich_text", List.of(Map.of("text", Map.of("content", "📌 " + text)))));

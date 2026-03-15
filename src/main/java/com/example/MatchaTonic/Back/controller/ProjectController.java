@@ -29,7 +29,7 @@ public class ProjectController {
     private final ProjectService projectService;
     private final UserRepository userRepository;
     private final NotionService notionService;
-    private final AiService aiService; // AiService 주입 추가
+    private final AiService aiService;
 
     @Operation(summary = "새 프로젝트 생성 (PROJ-01, PROJ-02)")
     @PostMapping
@@ -78,12 +78,22 @@ public class ProjectController {
     @PostMapping("/{projectId}/export")
     public ResponseEntity<String> exportToNotion(
             @PathVariable Long projectId,
-            @RequestBody ExportRequestDto exportRequestDto) { // AI 분석에 필요한 데이터를 담은 DTO로 변경
+            @RequestBody ExportRequestDto exportRequestDto) {
 
-        // NotionService를 직접 호출하던 기존 방식에서 AiService를 거치는 방식으로 변경
-        // 이 메서드 안에서 [FastAPI 호출 -> 데이터 수합 -> Notion 생성]이 모두 이루어집니다.
-        aiService.processAndExport(exportRequestDto);
+        // record인 ExportRequestDto의 불변성을 유지하며 PathVariable의 projectId를 주입
+        ExportRequestDto finalDto = exportRequestDto.withProjectId(projectId);
 
-        return ResponseEntity.ok("AI 분석 및 노션 내보내기가 성공적으로 완료되었습니다.");
+        try {
+            // AiService에서 FastAPI 호출 -> 데이터 수합 -> Notion 생성 로직 수행
+            aiService.processAndExport(finalDto);
+            return ResponseEntity.ok("AI 분석 및 노션 내보내기가 성공적으로 완료되었습니다.");
+        } catch (IllegalArgumentException e) {
+            // 유효하지 않은 노션 URL 등 입력값 관련 예외 처리
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        } catch (Exception e) {
+            // 기타 서버 내부 오류 처리
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("내보내기 중 오류가 발생했습니다: " + e.getMessage());
+        }
     }
 }
