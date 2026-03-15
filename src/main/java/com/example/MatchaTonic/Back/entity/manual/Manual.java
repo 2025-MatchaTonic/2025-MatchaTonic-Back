@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
+@Table(name = "manuals")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Manual {
 
