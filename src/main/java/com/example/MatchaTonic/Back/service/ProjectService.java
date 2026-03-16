@@ -26,14 +26,13 @@ public class ProjectService {
 
     /**
      * [PROJ-01, 02] 프로젝트 생성
-     * 생성한 유저를 명확하게 LEADER로 등록합니다.
      */
     public ProjectDto.CreateResponse createProject(ProjectDto.CreateRequest request, User leader) {
         // 1. 프로젝트 엔티티 생성 및 저장
         Project project = Project.builder()
                 .name(request.getName())
                 .subject(request.getSubject())
-                .leader(leader) // 엔티티 자체의 leader 필드 설정
+                .leader(leader)
                 .build();
 
         Project savedProject = projectRepository.save(project);
@@ -42,7 +41,7 @@ public class ProjectService {
         ProjectMember projectMember = ProjectMember.builder()
                 .user(leader)
                 .project(savedProject)
-                .role("LEADER") // 권한 확실히 부여
+                .role("LEADER")
                 .build();
 
         projectMemberRepository.save(projectMember);
@@ -103,17 +102,22 @@ public class ProjectService {
      * [HOME-04] 팀원 목록 조회
      */
     @Transactional(readOnly = true)
-    public List<MemberDto.InfoResponse> getProjectMembers(Long projectId) {
+    public ProjectDto.TeamResponse getProjectMembers(Long projectId) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
-        return projectMemberRepository.findByProject(project).stream()
+        List<MemberDto.InfoResponse> members = projectMemberRepository.findByProject(project).stream()
                 .map(m -> MemberDto.InfoResponse.builder()
                         .name(m.getUser().getName())
                         .email(m.getUser().getEmail())
                         .role(m.getRole())
                         .build())
                 .collect(Collectors.toList());
+
+        return ProjectDto.TeamResponse.builder()
+                .inviteCode(project.getInviteCode())
+                .members(members)
+                .build();
     }
 
     /**

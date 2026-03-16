@@ -61,9 +61,10 @@ public class ProjectController {
         return ResponseEntity.ok("성공적으로 참여되었습니다.");
     }
 
+    // [수정] 팀원 목록 조회 (초대 코드 포함을 위해 리턴 타입 변경)
     @Operation(summary = "팀원 목록 조회 (HOME-04)")
     @GetMapping("/{projectId}/members")
-    public ResponseEntity<List<MemberDto.InfoResponse>> getProjectMembers(@PathVariable Long projectId) {
+    public ResponseEntity<ProjectDto.TeamResponse> getProjectMembers(@PathVariable Long projectId) {
         return ResponseEntity.ok(projectService.getProjectMembers(projectId));
     }
 

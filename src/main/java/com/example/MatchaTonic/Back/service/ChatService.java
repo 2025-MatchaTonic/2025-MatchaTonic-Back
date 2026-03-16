@@ -56,7 +56,6 @@ public class ChatService {
 
     private void callAiAndBroadcast(Project project, ChatMessageDto userDto) {
         try {
-            // 수정된 레포지토리 메서드 사용
             List<String> recentMessages = chatMessageRepository
                     .findByProjectIdWithDetails(project.getId())
                     .stream()
