@@ -63,10 +63,16 @@ public class ChatService {
         log.info("Broadcasting message to /sub/project/{}", dto.getProjectId());
         messagingTemplate.convertAndSend("/sub/project/" + dto.getProjectId(), dto);
 
-        // 3. AI 호출 조건: TALK이면서 발신자가 AI가 아닐 때만
-        if (ChatMessageDto.MessageType.TALK.equals(dto.getType()) &&
-                !"ai@promate.ai".equals(dto.getSenderEmail())) {
+        // [수정] 3. AI 호출 조건: TALK 타입 + 발신자가 AI 아님 + 메시지에 "@mates" 포함 시에만 호출
+        boolean isTalk = ChatMessageDto.MessageType.TALK.equals(dto.getType());
+        boolean isNotAi = !"ai@promate.ai".equals(dto.getSenderEmail());
+        boolean hasAiMention = dto.getMessage() != null && dto.getMessage().contains("@mates");
+
+        if (isTalk && isNotAi && hasAiMention) {
+            log.info("AI 호출 조건을 만족함 (@mates 감지): 프로젝트ID={}", project.getId());
             callAiAndBroadcast(project, dto);
+        } else {
+            log.info("AI 호출 조건 미충족 (일반 대화 또는 호출어 없음)");
         }
     }
 
@@ -152,7 +158,9 @@ public class ChatService {
                     .createdAt(LocalDateTime.now())
                     .build();
 
-            saveAndSendMessage(aiMsg);
+            // 입장 인사말은 "@mates" 체크 없이 즉시 전송
+            saveToDb(aiMsg, project);
+            messagingTemplate.convertAndSend("/sub/project/" + projectId, aiMsg);
         }
     }
 
