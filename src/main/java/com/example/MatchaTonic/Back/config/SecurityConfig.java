@@ -45,7 +45,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
 
                 .authorizeHttpRequests(auth -> auth
-                        // [수정] 이미지 및 정적 리소스 허용 추가 (403 방지)
+                        // 이미지 및 정적 리소스 허용 추가 (403 방지)
                         .requestMatchers("/", "/login/**", "/oauth2/**", "/health", "/images/**", "/static/**", "/favicon.ico").permitAll()
                         .requestMatchers("/api/users/**").permitAll()
                         .requestMatchers("/api/manuals/**").permitAll()

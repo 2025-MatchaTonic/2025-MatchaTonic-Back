@@ -14,7 +14,7 @@ import java.util.List;
 
 @Slf4j
 @Tag(name = "Chat", description = "실시간 채팅 및 내역 조회 API")
-@RestController // [변경] @Controller + @ResponseBody 대신 RestController 사용
+@RestController
 @RequiredArgsConstructor
 public class ChatController {
 
@@ -22,33 +22,22 @@ public class ChatController {
 
     /**
      * [CHAT-01] 실시간 메시지 송수신 (WebSocket)
-     * 프론트엔드 발신 경로: /pub/chat/message
+     * 프론트엔드 발행 경로: /pub/chat/message
      */
     @MessageMapping("/chat/message")
     public void message(ChatMessageDto message) {
-        log.info("채팅 수신: ProjectId={}, SenderEmail={}, Message={}",
+        log.info("WebSocket 메시지 수신: ProjectId={}, SenderEmail={}, Message={}",
                 message.getProjectId(), message.getSenderEmail(), message.getMessage());
-
-        if (ChatMessageDto.MessageType.ENTER.equals(message.getType())) {
-            ChatMessageDto enterMessage = ChatMessageDto.builder()
-                    .type(message.getType())
-                    .projectId(message.getProjectId())
-                    .senderEmail(message.getSenderEmail())
-                    .senderName(message.getSenderName())
-                    .message(message.getSenderName() + "님이 입장하셨습니다.")
-                    .build();
-            chatService.saveAndSendMessage(enterMessage);
-        } else {
-            chatService.saveAndSendMessage(message);
-        }
+        chatService.saveAndSendMessage(message);
     }
 
     /**
-     * [CHAT-02] 프로젝트 진입 시점 처리 (AI 체크)
+     * [CHAT-02] 프로젝트 진입 시점 처리 (AI 인사말 체크)
+     * 프론트엔드 발행 경로: /pub/chat/enter
      */
     @MessageMapping("/chat/enter")
     public void enter(ChatMessageDto message) {
-        log.info("프로젝트 입장(AI 체크 요청): ProjectId={}", message.getProjectId());
+        log.info("프로젝트 입장(AI 체크): ProjectId={}", message.getProjectId());
         chatService.checkSubjectAndInitiateAI(message.getProjectId());
     }
 
@@ -58,11 +47,23 @@ public class ChatController {
     @Operation(summary = "과거 채팅 내역 조회")
     @GetMapping("/api/chat/{projectId}/messages")
     public ResponseEntity<List<ChatMessageDto>> getChatMessages(@PathVariable("projectId") Long projectId) {
-        log.info("과거 내역 조회 실행 요청: ProjectId={}", projectId);
+        log.info("과거 내역 조회 요청: ProjectId={}", projectId);
         List<ChatMessageDto> messages = chatService.getChatMessages(projectId);
-
-        // 데이터가 없으면 빈 리스트 반환 (프론트에서 null 체크 방지)
-        log.info("조회된 메시지 개수: {}", messages.size());
         return ResponseEntity.ok(messages);
+    }
+
+    /**
+     * [CHAT-04] 메시지 전송 폴백 (REST API)
+     * 프론트엔드가 STOMP 연결 실패 시 호출하는 경로
+     */
+    @Operation(summary = "메시지 전송 폴백 (REST)")
+    @PostMapping("/api/chat/{projectId}/messages")
+    public ResponseEntity<Void> sendMessageFallback(
+            @PathVariable("projectId") Long projectId,
+            @RequestBody ChatMessageDto dto) {
+        log.info("REST 폴백 메시지 수신: ProjectId={}, Message={}", projectId, dto.getMessage());
+        dto.setProjectId(projectId);
+        chatService.saveAndSendMessage(dto);
+        return ResponseEntity.ok().build();
     }
 }
