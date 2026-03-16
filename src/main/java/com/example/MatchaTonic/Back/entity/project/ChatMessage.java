@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @EntityListeners(AuditingEntityListener.class)
+@Table(name = "chat_messages")
 public class ChatMessage {
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -34,6 +35,7 @@ public class ChatMessage {
     private MessageType type;
 
     @CreatedDate
+    @Column(updatable = false)
     private LocalDateTime timestamp;
 
     public enum MessageType {

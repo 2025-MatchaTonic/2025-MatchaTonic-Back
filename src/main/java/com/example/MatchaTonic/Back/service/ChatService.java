@@ -41,14 +41,16 @@ public class ChatService {
         Project project = projectRepository.findById(dto.getProjectId())
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
 
+        // 1. DB 저장 (ENTER 타입 제외)
         if (!ChatMessageDto.MessageType.ENTER.equals(dto.getType())) {
             saveToDb(dto, project);
         }
 
-        // 브로드캐스팅 로그 추가
-        log.info("Sending message to /sub/project/{} : {}", dto.getProjectId(), dto.getMessage());
+        // 2. 브로드캐스팅 (senderEmail, senderName이 포함된 dto를 그대로 전송하여 프론트 중복 방지)
+        log.info("Broadcasting message from {}: {}", dto.getSenderEmail(), dto.getMessage());
         messagingTemplate.convertAndSend("/sub/project/" + dto.getProjectId(), dto);
 
+        // 3. AI 응답 처리
         if (ChatMessageDto.MessageType.TALK.equals(dto.getType())) {
             callAiAndBroadcast(project, dto);
         }
@@ -85,6 +87,7 @@ public class ChatService {
                         .type(ChatMessageDto.MessageType.SYSTEM)
                         .projectId(project.getId())
                         .senderName("Promate AI")
+                        .senderEmail("ai@promate.ai") // AI 식별용 가상 이메일
                         .message(response.content())
                         .build();
 
@@ -98,20 +101,21 @@ public class ChatService {
 
     private void saveToDb(ChatMessageDto dto, Project project) {
         User sender = null;
+        // dto에 senderEmail이 있으면 DB에서 유저를 찾아 연결
         if (dto.getSenderEmail() != null && !dto.getSenderEmail().isBlank()) {
             sender = userRepository.findByEmail(dto.getSenderEmail()).orElse(null);
         }
 
         ChatMessage chatMessage = ChatMessage.builder()
                 .project(project)
-                .sender(sender)
+                .sender(sender) // 찾은 유저 저장 (null이면 SYSTEM 메시지로 처리됨)
                 .message(dto.getMessage())
                 .type(dto.getType() == ChatMessageDto.MessageType.SYSTEM ?
                         ChatMessage.MessageType.SYSTEM : ChatMessage.MessageType.TALK)
                 .build();
 
         chatMessageRepository.save(chatMessage);
-        log.info("DB 저장 완료: {}", dto.getMessage());
+        log.info("DB 저장 완료: [발신자: {}] [내용: {}]", dto.getSenderEmail(), dto.getMessage());
     }
 
     @Transactional
@@ -126,6 +130,7 @@ public class ChatService {
                     .type(ChatMessageDto.MessageType.SYSTEM)
                     .projectId(projectId)
                     .senderName("Promate AI")
+                    .senderEmail("ai@promate.ai")
                     .message("반가워요! 아직 프로젝트 주제가 정해지지 않았네요. 어떤 아이디어를 가지고 계신가요?")
                     .build();
 
@@ -140,7 +145,7 @@ public class ChatService {
                         .type(m.getType() == ChatMessage.MessageType.SYSTEM ?
                                 ChatMessageDto.MessageType.SYSTEM : ChatMessageDto.MessageType.TALK)
                         .projectId(m.getProject().getId())
-                        .senderEmail(m.getSender() != null ? m.getSender().getEmail() : null)
+                        .senderEmail(m.getSender() != null ? m.getSender().getEmail() : "ai@promate.ai")
                         .senderName(m.getSender() != null ? m.getSender().getName() : "Promate AI")
                         .message(m.getMessage())
                         .createdAt(m.getTimestamp())
