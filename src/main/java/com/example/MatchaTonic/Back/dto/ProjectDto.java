@@ -19,6 +19,8 @@ public class ProjectDto {
 
     @Getter
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class CreateResponse {
         private Long projectId;
         private String name;
@@ -29,6 +31,8 @@ public class ProjectDto {
 
     @Getter
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ListResponse {
         private Long id;
         private String name;
@@ -36,6 +40,7 @@ public class ProjectDto {
         private String role;
         private String status;
         private Long chatRoomId;
+        private String inviteCode;
     }
 
     @Getter

@@ -24,6 +24,9 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
 
+    /**
+     * 프로젝트 생성
+     */
     public ProjectDto.CreateResponse createProject(ProjectDto.CreateRequest request, User leader) {
         Project project = Project.builder()
                 .name(request.getName())
@@ -51,6 +54,9 @@ public class ProjectService {
                 .build();
     }
 
+    /**
+     * 내 프로젝트 목록 조회 (inviteCode 포함)
+     */
     @Transactional(readOnly = true)
     public List<ProjectDto.ListResponse> getMyProjects(User user) {
         return projectMemberRepository.findByUser(user).stream()
@@ -61,10 +67,14 @@ public class ProjectService {
                         .role(pm.getRole())
                         .status(pm.getProject().getStatus())
                         .chatRoomId(pm.getProject().getId())
+                        .inviteCode(pm.getProject().getInviteCode())
                         .build())
                 .collect(Collectors.toList());
     }
 
+    /**
+     * 초대코드로 프로젝트 참여
+     */
     public void joinProject(String inviteCode, User user) {
         Project project = projectRepository.findByInviteCode(inviteCode)
                 .orElseThrow(() -> new IllegalArgumentException("유효하지 않은 초대 코드입니다."));
@@ -82,6 +92,9 @@ public class ProjectService {
         projectMemberRepository.save(projectMember);
     }
 
+    /**
+     * 팀원 목록 조회
+     */
     @Transactional(readOnly = true)
     public ProjectDto.TeamResponse getProjectMembers(Long projectId) {
         Project project = projectRepository.findById(projectId)
@@ -101,6 +114,9 @@ public class ProjectService {
                 .build();
     }
 
+    /**
+     * 프로젝트 삭제
+     */
     public void deleteProject(Long projectId, User user) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));

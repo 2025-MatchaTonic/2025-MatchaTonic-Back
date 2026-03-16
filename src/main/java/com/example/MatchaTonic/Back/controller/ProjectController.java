@@ -30,7 +30,7 @@ public class ProjectController {
     private final NotionService notionService;
     private final AiService aiService;
 
-    @Operation(summary = "새 프로젝트 생성 (PROJ-01, PROJ-02)")
+    @Operation(summary = "새 프로젝트 생성")
     @PostMapping
     public ResponseEntity<ProjectDto.CreateResponse> createProject(
             @Parameter(hidden = true) @AuthenticationPrincipal String email,
@@ -41,7 +41,7 @@ public class ProjectController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    @Operation(summary = "내 프로젝트 목록 조회 (HOME-01, HOME-02)")
+    @Operation(summary = "내 프로젝트 목록 조회")
     @GetMapping("/me")
     public ResponseEntity<List<ProjectDto.ListResponse>> getMyProjects(
             @Parameter(hidden = true) @AuthenticationPrincipal String email) {
@@ -50,7 +50,7 @@ public class ProjectController {
         return ResponseEntity.ok(projectService.getMyProjects(user));
     }
 
-    @Operation(summary = "초대 코드로 프로젝트 참여 (PROJ-04)")
+    @Operation(summary = "초대 코드로 프로젝트 참여")
     @PostMapping("/join")
     public ResponseEntity<String> joinProject(
             @Parameter(hidden = true) @AuthenticationPrincipal String email,
@@ -61,14 +61,12 @@ public class ProjectController {
         return ResponseEntity.ok("성공적으로 참여되었습니다.");
     }
 
-    // [수정] 팀원 목록 조회 (초대 코드 포함을 위해 리턴 타입 변경)
-    @Operation(summary = "팀원 목록 조회 (HOME-04)")
+    @Operation(summary = "팀원 목록 조회 (inviteCode 포함)")
     @GetMapping("/{projectId}/members")
     public ResponseEntity<ProjectDto.TeamResponse> getProjectMembers(@PathVariable Long projectId) {
         return ResponseEntity.ok(projectService.getProjectMembers(projectId));
     }
 
-    // [ADD] 프로젝트 삭제 API 추가
     @Operation(summary = "프로젝트 삭제 (방장 전용)")
     @DeleteMapping("/{projectId}")
     public ResponseEntity<String> deleteProject(
@@ -86,7 +84,7 @@ public class ProjectController {
                 .orElseThrow(() -> new RuntimeException("유저를 찾을 수 없습니다."));
     }
 
-    @Operation(summary = "AI 분석 및 노션으로 내보내기 (EXP-01, 02)")
+    @Operation(summary = "AI 분석 및 노션으로 내보내기")
     @PostMapping("/{projectId}/export")
     public ResponseEntity<String> exportToNotion(
             @PathVariable Long projectId,
