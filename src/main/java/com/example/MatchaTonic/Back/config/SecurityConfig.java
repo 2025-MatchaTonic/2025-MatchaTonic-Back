@@ -45,12 +45,21 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
 
                 .authorizeHttpRequests(auth -> auth
-                        // 이미지 및 정적 리소스 허용 추가 (403 방지)
+                        // 1. 공통 및 정적 리소스 허용
                         .requestMatchers("/", "/login/**", "/oauth2/**", "/health", "/images/**", "/static/**", "/favicon.ico").permitAll()
                         .requestMatchers("/api/users/**").permitAll()
                         .requestMatchers("/api/manuals/**").permitAll()
+
+                        // 2. 채팅 및 프로젝트/멤버 API 허용
+                        .requestMatchers("/api/chat/**").permitAll()
+                        .requestMatchers("/api/projects/**").permitAll()
+                        .requestMatchers("/api/project/**").permitAll()
+
+                        // 3. 웹소켓 및 스웨거 허용
                         .requestMatchers("/ws-stomp/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+
+                        // 나머지는 인증 필요
                         .anyRequest().authenticated()
                 )
 
@@ -59,13 +68,12 @@ public class SecurityConfig {
                         .successHandler(oAuth2SuccessHandler)
                 )
 
-                // [수정] post_logout_redirect_uri 파라미터 지원 로그아웃 설정
                 .logout(logout -> logout
                         .logoutUrl("/api/users/logout")
                         .logoutSuccessHandler((request, response, authentication) -> {
                             String redirectUri = request.getParameter("post_logout_redirect_uri");
                             if (redirectUri == null || redirectUri.isEmpty()) {
-                                redirectUri = "https://promate.ai.kr"; // 기본값
+                                redirectUri = "https://promate.ai.kr";
                             }
                             response.sendRedirect(redirectUri);
                         })
@@ -82,14 +90,12 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(true);
-
         config.setAllowedOriginPatterns(List.of(
                 "http://localhost:3000",
                 "https://promate.ai.kr",
                 "http://promate.ai.kr",
                 "https://api.promate.ai.kr"
         ));
-
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization", "Set-Cookie"));
