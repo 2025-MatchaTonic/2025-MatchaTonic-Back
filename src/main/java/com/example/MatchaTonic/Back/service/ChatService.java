@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,15 +41,14 @@ public class ChatService {
         Project project = projectRepository.findById(dto.getProjectId())
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
 
-        // 1. DB에 메시지 저장 (ENTER 제외한 모든 타입 저장)
         if (!ChatMessageDto.MessageType.ENTER.equals(dto.getType())) {
             saveToDb(dto, project);
         }
 
-        // 2. 실시간 브로드캐스팅 (통일된 경로: /sub/project/)
+        // 브로드캐스팅 로그 추가
+        log.info("Sending message to /sub/project/{} : {}", dto.getProjectId(), dto.getMessage());
         messagingTemplate.convertAndSend("/sub/project/" + dto.getProjectId(), dto);
 
-        // 3. 사용자 메시지(TALK)일 경우 AI 응답 호출
         if (ChatMessageDto.MessageType.TALK.equals(dto.getType())) {
             callAiAndBroadcast(project, dto);
         }
@@ -58,9 +56,9 @@ public class ChatService {
 
     private void callAiAndBroadcast(Project project, ChatMessageDto userDto) {
         try {
-            // 최근 대화 내역 조회
+            // 수정된 레포지토리 메서드 사용
             List<String> recentMessages = chatMessageRepository
-                    .findByProjectIdOrderByTimestampAsc(project.getId())
+                    .findByProjectIdWithDetails(project.getId())
                     .stream()
                     .map(ChatMessage::getMessage)
                     .filter(msg -> msg != null && !msg.isBlank())
@@ -81,7 +79,6 @@ public class ChatService {
                     recentMessages
             );
 
-            // AI 서버 호출
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
             if (response != null && response.content() != null) {
@@ -102,7 +99,6 @@ public class ChatService {
 
     private void saveToDb(ChatMessageDto dto, Project project) {
         User sender = null;
-        // 이메일이 있으면 유저를 찾고, 없으면 시스템(AI) 메시지로 간주
         if (dto.getSenderEmail() != null && !dto.getSenderEmail().isBlank()) {
             sender = userRepository.findByEmail(dto.getSenderEmail()).orElse(null);
         }
@@ -116,7 +112,7 @@ public class ChatService {
                 .build();
 
         chatMessageRepository.save(chatMessage);
-        log.info("채팅 저장 성공: {}", dto.getMessage());
+        log.info("DB 저장 완료: {}", dto.getMessage());
     }
 
     @Transactional
@@ -124,7 +120,6 @@ public class ChatService {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
 
-        // 주제가 없고 메시지가 하나도 없을 때만 인사말 전송
         if ((project.getSubject() == null || project.getSubject().isEmpty())
                 && chatMessageRepository.countByProjectId(projectId) == 0) {
 
@@ -141,7 +136,7 @@ public class ChatService {
 
     @Transactional(readOnly = true)
     public List<ChatMessageDto> getChatMessages(Long projectId) {
-        return chatMessageRepository.findByProjectIdOrderByTimestampAsc(projectId).stream()
+        return chatMessageRepository.findByProjectIdWithDetails(projectId).stream()
                 .map(m -> ChatMessageDto.builder()
                         .type(m.getType() == ChatMessage.MessageType.SYSTEM ?
                                 ChatMessageDto.MessageType.SYSTEM : ChatMessageDto.MessageType.TALK)
