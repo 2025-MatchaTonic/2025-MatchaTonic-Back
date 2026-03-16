@@ -15,7 +15,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -34,10 +33,10 @@ public class ProjectController {
     @Operation(summary = "새 프로젝트 생성 (PROJ-01, PROJ-02)")
     @PostMapping
     public ResponseEntity<ProjectDto.CreateResponse> createProject(
-            @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal,
+            @Parameter(hidden = true) @AuthenticationPrincipal String email, // OAuth2User -> String 변경
             @RequestBody ProjectDto.CreateRequest request) {
 
-        User user = getUserFromPrincipal(principal);
+        User user = getUserFromEmail(email);
         ProjectDto.CreateResponse response = projectService.createProject(request, user);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
@@ -45,19 +44,19 @@ public class ProjectController {
     @Operation(summary = "내 프로젝트 목록 조회 (HOME-01, HOME-02)")
     @GetMapping("/me")
     public ResponseEntity<List<ProjectDto.ListResponse>> getMyProjects(
-            @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal) {
+            @Parameter(hidden = true) @AuthenticationPrincipal String email) { // OAuth2User -> String 변경
 
-        User user = getUserFromPrincipal(principal);
+        User user = getUserFromEmail(email);
         return ResponseEntity.ok(projectService.getMyProjects(user));
     }
 
     @Operation(summary = "초대 코드로 프로젝트 참여 (PROJ-04)")
     @PostMapping("/join")
     public ResponseEntity<String> joinProject(
-            @Parameter(hidden = true) @AuthenticationPrincipal OAuth2User principal,
+            @Parameter(hidden = true) @AuthenticationPrincipal String email, // OAuth2User -> String 변경
             @RequestBody MemberDto.JoinRequest request) {
 
-        User user = getUserFromPrincipal(principal);
+        User user = getUserFromEmail(email);
         projectService.joinProject(request.getInviteCode(), user);
         return ResponseEntity.ok("성공적으로 참여되었습니다.");
     }
@@ -68,10 +67,11 @@ public class ProjectController {
         return ResponseEntity.ok(projectService.getProjectMembers(projectId));
     }
 
-    private User getUserFromPrincipal(OAuth2User principal) {
-        if (principal == null) throw new RuntimeException("인증 정보가 없습니다.");
-        String email = principal.getAttribute("email");
-        return userRepository.findByEmail(email).orElseThrow(() -> new RuntimeException("유저를 찾을 수 없습니다."));
+    // 헬퍼 메서드명과 로직을 이메일 기반으로 수정
+    private User getUserFromEmail(String email) {
+        if (email == null) throw new RuntimeException("인증 정보가 없습니다.");
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("유저를 찾을 수 없습니다."));
     }
 
     @Operation(summary = "AI 분석 및 노션으로 내보내기 (EXP-01, 02)")
@@ -80,18 +80,14 @@ public class ProjectController {
             @PathVariable Long projectId,
             @RequestBody ExportRequestDto exportRequestDto) {
 
-        // record인 ExportRequestDto의 불변성을 유지하며 PathVariable의 projectId를 주입
         ExportRequestDto finalDto = exportRequestDto.withProjectId(projectId);
 
         try {
-            // AiService에서 FastAPI 호출 -> 데이터 수합 -> Notion 생성 로직 수행
             aiService.processAndExport(finalDto);
             return ResponseEntity.ok("AI 분석 및 노션 내보내기가 성공적으로 완료되었습니다.");
         } catch (IllegalArgumentException e) {
-            // 유효하지 않은 노션 URL 등 입력값 관련 예외 처리
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (Exception e) {
-            // 기타 서버 내부 오류 처리
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("내보내기 중 오류가 발생했습니다: " + e.getMessage());
         }
