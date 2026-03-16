@@ -42,13 +42,13 @@ public class ChatService {
         Project project = projectRepository.findById(dto.getProjectId())
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
 
-        // 1. DB에 메시지 저장 (ENTER 타입 제외)
+        // 1. DB에 메시지 저장 (ENTER 제외한 모든 타입 저장)
         if (!ChatMessageDto.MessageType.ENTER.equals(dto.getType())) {
             saveToDb(dto, project);
         }
 
-        // 2. 실시간 브로드캐스팅 (사용자 메시지)
-        messagingTemplate.convertAndSend("/sub/chat/room/" + dto.getProjectId(), dto);
+        // 2. 실시간 브로드캐스팅 (통일된 경로: /sub/project/)
+        messagingTemplate.convertAndSend("/sub/project/" + dto.getProjectId(), dto);
 
         // 3. 사용자 메시지(TALK)일 경우 AI 응답 호출
         if (ChatMessageDto.MessageType.TALK.equals(dto.getType())) {
@@ -58,7 +58,7 @@ public class ChatService {
 
     private void callAiAndBroadcast(Project project, ChatMessageDto userDto) {
         try {
-            // 대화 내역 조회
+            // 최근 대화 내역 조회
             List<String> recentMessages = chatMessageRepository
                     .findByProjectIdOrderByTimestampAsc(project.getId())
                     .stream()
@@ -66,12 +66,9 @@ public class ChatService {
                     .filter(msg -> msg != null && !msg.isBlank())
                     .collect(Collectors.toList());
 
-            // AI 서버 전송용 데이터 조립 (collectedData 포함)
             Map<String, String> collectedData = new HashMap<>();
             collectedData.put("title", project.getName() != null ? project.getName() : "");
             collectedData.put("goal", project.getSubject() != null ? project.getSubject() : "");
-            collectedData.put("dueDate", project.getCreatedAt() != null ?
-                    project.getCreatedAt().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) : "");
 
             AiChatRequestDto request = new AiChatRequestDto(
                     project.getId(),
@@ -84,7 +81,7 @@ public class ChatService {
                     recentMessages
             );
 
-            // AI 서버 호출 (POST /ai/chat/)
+            // AI 서버 호출
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
             if (response != null && response.content() != null) {
@@ -95,9 +92,8 @@ public class ChatService {
                         .message(response.content())
                         .build();
 
-                // DB 저장 및 실시간 전송 (AI 응답)
                 saveToDb(aiDto, project);
-                messagingTemplate.convertAndSend("/sub/chat/room/" + project.getId(), aiDto);
+                messagingTemplate.convertAndSend("/sub/project/" + project.getId(), aiDto);
             }
         } catch (Exception e) {
             log.error("AI 채팅 응답 호출 실패: {}", e.getMessage());
@@ -106,7 +102,8 @@ public class ChatService {
 
     private void saveToDb(ChatMessageDto dto, Project project) {
         User sender = null;
-        if (dto.getSenderEmail() != null) {
+        // 이메일이 있으면 유저를 찾고, 없으면 시스템(AI) 메시지로 간주
+        if (dto.getSenderEmail() != null && !dto.getSenderEmail().isBlank()) {
             sender = userRepository.findByEmail(dto.getSenderEmail()).orElse(null);
         }
 
@@ -117,7 +114,9 @@ public class ChatService {
                 .type(dto.getType() == ChatMessageDto.MessageType.SYSTEM ?
                         ChatMessage.MessageType.SYSTEM : ChatMessage.MessageType.TALK)
                 .build();
+
         chatMessageRepository.save(chatMessage);
+        log.info("채팅 저장 성공: {}", dto.getMessage());
     }
 
     @Transactional
@@ -125,6 +124,7 @@ public class ChatService {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
 
+        // 주제가 없고 메시지가 하나도 없을 때만 인사말 전송
         if ((project.getSubject() == null || project.getSubject().isEmpty())
                 && chatMessageRepository.countByProjectId(projectId) == 0) {
 

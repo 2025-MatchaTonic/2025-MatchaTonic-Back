@@ -33,7 +33,7 @@ public class ProjectController {
     @Operation(summary = "새 프로젝트 생성 (PROJ-01, PROJ-02)")
     @PostMapping
     public ResponseEntity<ProjectDto.CreateResponse> createProject(
-            @Parameter(hidden = true) @AuthenticationPrincipal String email, // OAuth2User -> String 변경
+            @Parameter(hidden = true) @AuthenticationPrincipal String email,
             @RequestBody ProjectDto.CreateRequest request) {
 
         User user = getUserFromEmail(email);
@@ -44,7 +44,7 @@ public class ProjectController {
     @Operation(summary = "내 프로젝트 목록 조회 (HOME-01, HOME-02)")
     @GetMapping("/me")
     public ResponseEntity<List<ProjectDto.ListResponse>> getMyProjects(
-            @Parameter(hidden = true) @AuthenticationPrincipal String email) { // OAuth2User -> String 변경
+            @Parameter(hidden = true) @AuthenticationPrincipal String email) {
 
         User user = getUserFromEmail(email);
         return ResponseEntity.ok(projectService.getMyProjects(user));
@@ -53,7 +53,7 @@ public class ProjectController {
     @Operation(summary = "초대 코드로 프로젝트 참여 (PROJ-04)")
     @PostMapping("/join")
     public ResponseEntity<String> joinProject(
-            @Parameter(hidden = true) @AuthenticationPrincipal String email, // OAuth2User -> String 변경
+            @Parameter(hidden = true) @AuthenticationPrincipal String email,
             @RequestBody MemberDto.JoinRequest request) {
 
         User user = getUserFromEmail(email);
@@ -67,7 +67,18 @@ public class ProjectController {
         return ResponseEntity.ok(projectService.getProjectMembers(projectId));
     }
 
-    // 헬퍼 메서드명과 로직을 이메일 기반으로 수정
+    // [ADD] 프로젝트 삭제 API 추가
+    @Operation(summary = "프로젝트 삭제 (방장 전용)")
+    @DeleteMapping("/{projectId}")
+    public ResponseEntity<String> deleteProject(
+            @PathVariable Long projectId,
+            @Parameter(hidden = true) @AuthenticationPrincipal String email) {
+
+        User user = getUserFromEmail(email);
+        projectService.deleteProject(projectId, user);
+        return ResponseEntity.ok("프로젝트가 삭제되었습니다.");
+    }
+
     private User getUserFromEmail(String email) {
         if (email == null) throw new RuntimeException("인증 정보가 없습니다.");
         return userRepository.findByEmail(email)

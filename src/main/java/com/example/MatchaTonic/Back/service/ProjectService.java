@@ -22,7 +22,6 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
 
-    // [PROJ-01, 02] 프로젝트 생성 로직
     public ProjectDto.CreateResponse createProject(ProjectDto.CreateRequest request, User leader) {
         Project project = Project.builder()
                 .name(request.getName())
@@ -47,7 +46,6 @@ public class ProjectService {
                 .build();
     }
 
-    // [HOME-01] 내 프로젝트 목록 조회
     @Transactional(readOnly = true)
     public List<ProjectDto.ListResponse> getMyProjects(User user) {
         return projectMemberRepository.findByUser(user).stream()
@@ -62,7 +60,6 @@ public class ProjectService {
                 .collect(Collectors.toList());
     }
 
-    // [PROJ-04] 초대 코드로 가입 로직
     public void joinProject(String inviteCode, User user) {
         Project project = projectRepository.findByInviteCode(inviteCode)
                 .orElseThrow(() -> new IllegalArgumentException("유효하지 않은 초대 코드입니다."));
@@ -78,7 +75,6 @@ public class ProjectService {
                 .build());
     }
 
-    // [HOME-04] 팀원 목록 조회 로직
     @Transactional(readOnly = true)
     public List<MemberDto.InfoResponse> getProjectMembers(Long projectId) {
         Project project = projectRepository.findById(projectId)
@@ -91,5 +87,18 @@ public class ProjectService {
                         .role(m.getRole())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    // 프로젝트 삭제 로직 추가
+    public void deleteProject(Long projectId, User user) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
+
+        // 방장만 삭제 가능하도록 검증
+        if (!project.getLeader().getId().equals(user.getId())) {
+            throw new IllegalStateException("프로젝트 삭제 권한이 없습니다. 방장만 삭제할 수 있습니다.");
+        }
+
+        projectRepository.delete(project);
     }
 }
