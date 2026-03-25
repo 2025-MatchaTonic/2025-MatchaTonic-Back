@@ -6,9 +6,11 @@ import com.example.MatchaTonic.Back.dto.ChatMessageDto;
 import com.example.MatchaTonic.Back.entity.login.User;
 import com.example.MatchaTonic.Back.entity.project.ChatMessage;
 import com.example.MatchaTonic.Back.entity.project.Project;
+import com.example.MatchaTonic.Back.entity.project.ProjectSessionSummary;
 import com.example.MatchaTonic.Back.repository.login.UserRepository;
 import com.example.MatchaTonic.Back.repository.project.ChatMessageRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
+import com.example.MatchaTonic.Back.repository.project.ProjectSessionSummaryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,6 +36,9 @@ public class ChatService {
     private final SimpMessageSendingOperations messagingTemplate;
     private final RestTemplate restTemplate;
 
+    // 정형 데이터 리포지토리
+    private final ProjectSessionSummaryRepository summaryRepository;
+
     @Value("${external.api.fastapi.chat-url}")
     private String aiChatUrl;
 
@@ -45,17 +50,14 @@ public class ChatService {
         Project project = projectRepository.findById(dto.getProjectId())
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
 
-        // 프론트에서 type을 안 보냈을 경우 기본 TALK로 설정
         if (dto.getType() == null) {
             dto.setType(ChatMessageDto.MessageType.TALK);
         }
 
-        // 1. DB 저장 (ENTER 타입 제외)
         if (!ChatMessageDto.MessageType.ENTER.equals(dto.getType())) {
             saveToDb(dto, project);
         }
 
-        // 2. 시간 설정 및 브로드캐스트
         if (dto.getCreatedAt() == null) {
             dto.setCreatedAt(LocalDateTime.now());
         }
@@ -63,7 +65,6 @@ public class ChatService {
         log.info("Broadcasting message to /sub/project/{}", dto.getProjectId());
         messagingTemplate.convertAndSend("/sub/project/" + dto.getProjectId(), dto);
 
-        // [수정] 3. AI 호출 조건: TALK 타입 + 발신자가 AI 아님 + 메시지에 "@mates" 포함 시에만 호출
         boolean isTalk = ChatMessageDto.MessageType.TALK.equals(dto.getType());
         boolean isNotAi = !"ai@promate.ai".equals(dto.getSenderEmail());
         boolean hasAiMention = dto.getMessage() != null && dto.getMessage().contains("@mates");
@@ -71,8 +72,6 @@ public class ChatService {
         if (isTalk && isNotAi && hasAiMention) {
             log.info("AI 호출 조건을 만족함 (@mates 감지): 프로젝트ID={}", project.getId());
             callAiAndBroadcast(project, dto);
-        } else {
-            log.info("AI 호출 조건 미충족 (일반 대화 또는 호출어 없음)");
         }
     }
 
@@ -98,20 +97,73 @@ public class ChatService {
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
             if (response != null && response.content() != null) {
+                String aiContent = response.content();
+
                 ChatMessageDto aiDto = ChatMessageDto.builder()
                         .type(ChatMessageDto.MessageType.SYSTEM)
                         .projectId(project.getId())
                         .senderName("Promate AI")
                         .senderEmail("ai@promate.ai")
-                        .message(response.content())
+                        .message(aiContent)
                         .createdAt(LocalDateTime.now())
                         .build();
 
                 saveToDb(aiDto, project);
+
+                if (shouldUpdateSummary(aiContent)) {
+                    updateProjectSummary(project, aiContent);
+                }
+
                 messagingTemplate.convertAndSend("/sub/project/" + project.getId(), aiDto);
             }
         } catch (Exception e) {
             log.error("AI 응답 처리 중 오류 발생: {}", e.getMessage());
+        }
+    }
+
+    private boolean shouldUpdateSummary(String content) {
+        if (content == null) return false;
+        boolean hasKeyWords = content.contains("요약") || content.contains("결정") ||
+                content.contains("확정") || content.contains("정리") ||
+                content.contains("선정");
+        boolean isLongEnough = content.length() > 100;
+        return hasKeyWords || isLongEnough;
+    }
+
+    /**
+     * AI 응답을 정형 데이터 테이블에 저장하는 로직
+     */
+    @Transactional
+    protected void updateProjectSummary(Project project, String aiContent) {
+        try {
+            ProjectSessionSummary summary = summaryRepository.findByProject(project)
+                    .orElseGet(() -> ProjectSessionSummary.builder()
+                            .project(project)
+                            .updatedSource("AI")
+                            .build());
+
+            summary.updateAll(
+                    project.getName(),   // title
+                    aiContent,           // goal
+                    "논의 중",            // teamSize
+                    "분석 중",            // roles
+                    "미정",               // dueDate
+                    "기획안",             // deliverables
+                    null,                // updatedBy
+                    "AI"
+            );
+
+            summaryRepository.save(summary);
+
+            // 2. 상태 변경 (기획 완료 단계로 진입)
+            if (aiContent.length() > 20) {
+                project.updateStatus("PLANNING_DONE");
+            }
+
+            projectRepository.save(project);
+            log.info("정형 세션 요약 테이블 및 프로젝트 상태(PLANNING_DONE) 자동 갱신 완료: ID={}", project.getId());
+        } catch (Exception e) {
+            log.error("세션 요약 데이터 정형화 저장 실패: {}", e.getMessage());
         }
     }
 
@@ -121,7 +173,6 @@ public class ChatService {
             sender = userRepository.findByEmail(dto.getSenderEmail()).orElse(null);
         }
 
-        // Enum 매핑 안전하게 처리
         ChatMessage.MessageType entityType = ChatMessage.MessageType.TALK;
         if (dto.getType() != null) {
             try {
@@ -158,7 +209,6 @@ public class ChatService {
                     .createdAt(LocalDateTime.now())
                     .build();
 
-            // 입장 인사말은 "@mates" 체크 없이 즉시 전송
             saveToDb(aiMsg, project);
             messagingTemplate.convertAndSend("/sub/project/" + projectId, aiMsg);
         }

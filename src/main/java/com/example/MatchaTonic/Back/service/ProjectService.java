@@ -5,8 +5,10 @@ import com.example.MatchaTonic.Back.dto.ProjectDto;
 import com.example.MatchaTonic.Back.entity.login.User;
 import com.example.MatchaTonic.Back.entity.project.Project;
 import com.example.MatchaTonic.Back.entity.project.ProjectMember;
+import com.example.MatchaTonic.Back.entity.project.ProjectSessionSummary;
 import com.example.MatchaTonic.Back.repository.project.ProjectMemberRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
+import com.example.MatchaTonic.Back.repository.project.ProjectSessionSummaryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +25,7 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
+    private final ProjectSessionSummaryRepository summaryRepository; // 정형 데이터 리포지토리 추가
 
     /**
      * 프로젝트 생성
@@ -126,5 +129,80 @@ public class ProjectService {
         }
 
         projectRepository.delete(project);
+    }
+
+    /**
+     * 프로젝트 상세 조회 (정형화된 세션 요약 포함)
+     */
+    @Transactional(readOnly = true)
+    public ProjectDto.DetailResponse getProjectDetail(Long projectId, User user) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
+
+        projectMemberRepository.findByUserAndProject(user, project)
+                .orElseThrow(() -> new IllegalStateException("해당 프로젝트에 접근 권한이 없습니다."));
+
+        // 정형 요약 데이터 조회 (없을 경우 빈 객체 처리)
+        ProjectSessionSummary summary = summaryRepository.findByProject(project).orElse(null);
+        ProjectDto.SessionSummaryDto summaryDto = null;
+
+        if (summary != null) {
+            summaryDto = ProjectDto.SessionSummaryDto.builder()
+                    .title(summary.getTitle())
+                    .goal(summary.getGoal())
+                    .teamSize(summary.getTeamSize())
+                    .roles(summary.getRoles())
+                    .dueDate(summary.getDueDate())
+                    .deliverables(summary.getDeliverables())
+                    .updatedSource(summary.getUpdatedSource())
+                    .updatedAt(summary.getUpdatedAt())
+                    .build();
+        }
+
+        return ProjectDto.DetailResponse.builder()
+                .id(project.getId())
+                .name(project.getName())
+                .subject(project.getSubject())
+                .inviteCode(project.getInviteCode())
+                .status(project.getStatus())
+                .chatRoomId(project.getId())
+                .summary(summaryDto) // String 대신 DTO 전달
+                .build();
+    }
+
+    /**
+     * 프로젝트 세션 요약 수동 업데이트 (정형 데이터 방식)
+     */
+    public void updateSessionSummary(Long projectId, ProjectDto.SummaryUpdateRequest request, User user) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
+
+        projectMemberRepository.findByUserAndProject(user, project)
+                .orElseThrow(() -> new IllegalStateException("업데이트 권한이 없습니다."));
+
+        // 기존 요약 정보를 찾거나 새로 생성
+        ProjectSessionSummary summary = summaryRepository.findByProject(project)
+                .orElseGet(() -> ProjectSessionSummary.builder()
+                        .project(project)
+                        .build());
+
+        summary.updateAll(
+                request.getTitle(),
+                request.getGoal(),
+                request.getTeamSize(),
+                request.getRoles(),
+                request.getDueDate(),
+                request.getDeliverables(),
+                user,
+                "MANUAL"
+        );
+
+        summaryRepository.save(summary);
+
+        if (request.getGoal() != null && request.getGoal().length() > 5) {
+            project.updateStatus("PLANNING_DONE");
+        }
+
+        log.info("프로젝트 정형 요약 수동 업데이트 완료 - ID: {}, 유저: {}", projectId, user.getEmail());
     }
 }

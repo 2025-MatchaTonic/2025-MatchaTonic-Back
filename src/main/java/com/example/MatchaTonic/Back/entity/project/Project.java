@@ -36,6 +36,9 @@ public class Project {
     @Column(nullable = false)
     private String status;
 
+    @OneToOne(mappedBy = "project", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private ProjectSessionSummary projectSessionSummary;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "leader_id")
     private User leader;
@@ -65,5 +68,16 @@ public class Project {
 
     public void updateStatus(String status) {
         this.status = status;
+    }
+
+    /**
+     * 프로젝트 상세 조회 등에서 요약본이 필요할 때 호출하는 메서드
+     * 이제 정형 데이터 테이블에서 값을 가져오거나 없으면 기본 메시지를 반환합니다.
+     */
+    public String getSessionSummaryText() {
+        if (projectSessionSummary == null || projectSessionSummary.getGoal() == null) {
+            return "아직 생성된 요약이 없습니다.";
+        }
+        return projectSessionSummary.getGoal(); // 혹은 필드들을 합쳐서 반환 가능
     }
 }

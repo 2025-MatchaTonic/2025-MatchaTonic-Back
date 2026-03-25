@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice // 모든 컨트롤러의 예외를 감시합니다
 public class GlobalExceptionHandler {
 
-    // 우리가 AiService에서 던졌던 RuntimeException을 처리합니다.
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException e) {
         log.error("비즈니스 로직 에러 발생: {}", e.getMessage());
@@ -19,7 +18,7 @@ public class GlobalExceptionHandler {
         ErrorResponse response = ErrorResponse.builder()
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .code("BIZ_ERROR")
-                .message(e.getMessage()) // "AI 분석 서버와 통신할 수 없습니다" 등이 전달됨
+                .message(e.getMessage())
                 .build();
 
         return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
