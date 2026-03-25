@@ -142,6 +142,7 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("해당 프로젝트에 접근 권한이 없습니다."));
 
+        // DB에서 요약 정보를 직접 조회
         ProjectSessionSummary summary = summaryRepository.findByProject(project).orElse(null);
         ProjectDto.SessionSummaryDto summaryDto = null;
 
@@ -172,6 +173,7 @@ public class ProjectService {
     /**
      * 프로젝트 정보 및 요약 업데이트
      */
+    @Transactional
     public void updateSessionSummary(Long projectId, ProjectDto.SummaryUpdateRequest request, User user) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
@@ -179,7 +181,7 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("업데이트 권한이 없습니다."));
 
-        // 프로젝트 기본 정보 업데이트
+        // 1. 프로젝트 기본 정보 업데이트 (이름, 주제)
         if (request.getName() != null && !request.getName().isEmpty()) {
             project.updateName(request.getName());
         }
@@ -187,14 +189,17 @@ public class ProjectService {
             project.updateSubject(request.getSubject());
         }
 
-        // 정형 요약 데이터 업데이트
+        // 2. 정형 요약 데이터 업데이트 또는 생성
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
                 .orElseGet(() -> ProjectSessionSummary.builder()
                         .project(project)
                         .build());
 
+        // 사용자가 수정한 데이터 반영
+        String titleToUpdate = (request.getTitle() != null) ? request.getTitle() : project.getName();
+
         summary.updateAll(
-                request.getTitle(),
+                titleToUpdate,
                 request.getGoal(),
                 request.getTeamSize(),
                 request.getRoles(),
@@ -204,13 +209,15 @@ public class ProjectService {
                 "MANUAL"
         );
 
+        // 3. 데이터 저장 강제
         summaryRepository.save(summary);
         projectRepository.save(project);
 
+        // 4. 상태 업데이트
         if (request.getGoal() != null && request.getGoal().length() > 5) {
             project.updateStatus("PLANNING_DONE");
         }
 
-        log.info("프로젝트 정보 및 요약 업데이트 완료 - ID: {}, 이름: {}, 유저: {}", projectId, project.getName(), user.getEmail());
+        log.info("수동 업데이트 완료 - 프로젝트ID: {}, 업데이트 소스: MANUAL", projectId);
     }
 }

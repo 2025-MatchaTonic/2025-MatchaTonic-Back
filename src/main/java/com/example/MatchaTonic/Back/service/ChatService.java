@@ -57,8 +57,9 @@ public class ChatService {
             saveToDb(dto, project);
         }
 
-        if (dto.getCreatedAt() == null) {
-            dto.setCreatedAt(LocalDateTime.now());
+
+        if (dto.getTimestamp() == null) {
+            dto.setTimestamp(LocalDateTime.now());
         }
 
         log.info("Broadcasting message to /sub/project/{}", dto.getProjectId());
@@ -104,7 +105,7 @@ public class ChatService {
                         .senderName("Promate AI")
                         .senderEmail("ai@promate.ai")
                         .message(aiContent)
-                        .createdAt(LocalDateTime.now())
+                        .timestamp(LocalDateTime.now()) // createdAt -> timestamp
                         .build();
 
                 saveToDb(aiDto, project);
@@ -122,31 +123,23 @@ public class ChatService {
 
     private boolean shouldUpdateSummary(String content) {
         if (content == null) return false;
-        boolean hasKeyWords = content.contains("요약") || content.contains("결정") ||
+        return content.contains("요약") || content.contains("결정") ||
                 content.contains("확정") || content.contains("정리") ||
-                content.contains("선정");
-        boolean isLongEnough = content.length() > 100;
-        return hasKeyWords || isLongEnough;
+                content.contains("선정") || content.length() > 100;
     }
 
-    /**
-     * AI 응답을 정형 데이터 테이블에 저장하는 로직
-     */
     @Transactional
     protected void updateProjectSummary(Project project, String aiContent) {
         try {
-            // 1. AI 응답에서 제목 추출 및 프로젝트 이름 업데이트
             if (aiContent.contains("제목 '") && aiContent.contains("'가 확인됐습니다")) {
                 int start = aiContent.indexOf("제목 '") + 4;
                 int end = aiContent.indexOf("'", start);
                 if (start > 3 && end > start) {
                     String newName = aiContent.substring(start, end);
                     project.updateName(newName);
-                    log.info("AI 응답을 통해 프로젝트 이름 변경 완료: {}", newName);
                 }
             }
 
-            // 2. 정형 데이터 테이블(ProjectSessionSummary) 업데이트
             ProjectSessionSummary summary = summaryRepository.findByProject(project)
                     .orElseGet(() -> ProjectSessionSummary.builder()
                             .project(project)
@@ -155,26 +148,24 @@ public class ChatService {
 
             summary.updateAll(
                     project.getName(),
-                    aiContent,           // goal
-                    "논의 중",            // teamSize
-                    "분석 중",            // roles
-                    "미정",               // dueDate
-                    "기획안",             // deliverables
-                    null,                // updatedBy
+                    aiContent,
+                    "논의 중",
+                    "분석 중",
+                    "미정",
+                    "기획안",
+                    null,
                     "AI"
             );
 
             summaryRepository.save(summary);
 
-            // 3. 상태 변경 (기획 완료 단계로 진입)
             if (aiContent.length() > 20) {
                 project.updateStatus("PLANNING_DONE");
             }
 
             projectRepository.save(project);
-            log.info("정형 세션 요약 테이블 및 프로젝트 상태(PLANNING_DONE) 자동 갱신 완료: ID={}", project.getId());
         } catch (Exception e) {
-            log.error("세션 요약 데이터 정형화 저장 실패: {}", e.getMessage());
+            log.error("세션 요약 데이터 저장 실패: {}", e.getMessage());
         }
     }
 
@@ -217,7 +208,7 @@ public class ChatService {
                     .senderName("Promate AI")
                     .senderEmail("ai@promate.ai")
                     .message("반가워요! 아직 프로젝트 주제가 정해지지 않았네요. 어떤 아이디어를 가지고 계신가요?")
-                    .createdAt(LocalDateTime.now())
+                    .timestamp(LocalDateTime.now())
                     .build();
 
             saveToDb(aiMsg, project);
@@ -234,7 +225,7 @@ public class ChatService {
                         .senderEmail(m.getSender() != null ? m.getSender().getEmail() : "ai@promate.ai")
                         .senderName(m.getSender() != null ? m.getSender().getName() : "Promate AI")
                         .message(m.getMessage())
-                        .createdAt(m.getTimestamp())
+                        .timestamp(m.getTimestamp())
                         .build())
                 .collect(Collectors.toList());
     }
