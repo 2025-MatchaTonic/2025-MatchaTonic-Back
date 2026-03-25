@@ -78,12 +78,6 @@ public class ProjectController {
         return ResponseEntity.ok("프로젝트가 삭제되었습니다.");
     }
 
-    private User getUserFromEmail(String email) {
-        if (email == null) throw new RuntimeException("인증 정보가 없습니다.");
-        return userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("유저를 찾을 수 없습니다."));
-    }
-
     @Operation(summary = "AI 분석 및 노션으로 내보내기")
     @PostMapping("/{projectId}/export")
     public ResponseEntity<String> exportToNotion(
@@ -101,5 +95,37 @@ public class ProjectController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("내보내기 중 오류가 발생했습니다: " + e.getMessage());
         }
+    }
+
+    @Operation(summary = "프로젝트 상세 조회 (정형화된 세션 요약 포함)")
+    @GetMapping("/{projectId}")
+    public ResponseEntity<ProjectDto.DetailResponse> getProjectDetail(
+            @PathVariable Long projectId,
+            @Parameter(hidden = true) @AuthenticationPrincipal String email) {
+
+        User user = getUserFromEmail(email);
+        ProjectDto.DetailResponse response = projectService.getProjectDetail(projectId, user);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     *  프로젝트 세션 요약 수동 업데이트
+     */
+    @Operation(summary = "프로젝트 세션 요약 수동 업데이트 (항목별 업데이트)")
+    @PatchMapping("/{projectId}/summary")
+    public ResponseEntity<String> updateSessionSummary(
+            @PathVariable Long projectId,
+            @RequestBody ProjectDto.SummaryUpdateRequest request,
+            @Parameter(hidden = true) @AuthenticationPrincipal String email) {
+
+        User user = getUserFromEmail(email);
+        projectService.updateSessionSummary(projectId, request, user);
+        return ResponseEntity.ok("세션 요약이 성공적으로 업데이트되었습니다.");
+    }
+
+    private User getUserFromEmail(String email) {
+        if (email == null) throw new RuntimeException("인증 정보가 없습니다.");
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("유저를 찾을 수 없습니다."));
     }
 }
