@@ -109,9 +109,9 @@ public class ProjectController {
     }
 
     /**
-     *  프로젝트 세션 요약 수동 업데이트
+     * 프로젝트 정보 및 세션 요약 수동 업데이트
      */
-    @Operation(summary = "프로젝트 세션 요약 수동 업데이트 (항목별 업데이트)")
+    @Operation(summary = "프로젝트 정보 및 세션 요약 수동 업데이트 ")
     @PatchMapping("/{projectId}/summary")
     public ResponseEntity<String> updateSessionSummary(
             @PathVariable Long projectId,
@@ -120,7 +120,7 @@ public class ProjectController {
 
         User user = getUserFromEmail(email);
         projectService.updateSessionSummary(projectId, request, user);
-        return ResponseEntity.ok("세션 요약이 성공적으로 업데이트되었습니다.");
+        return ResponseEntity.ok("프로젝트 정보 및 세션 요약이 성공적으로 업데이트되었습니다.");
     }
 
     private User getUserFromEmail(String email) {

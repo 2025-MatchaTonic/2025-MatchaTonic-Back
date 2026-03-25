@@ -89,12 +89,16 @@ public class ProjectDto {
     }
 
     /**
-     * 수동으로 요약을 수정할 때 사용하는 요청 DTO
+     * 수동으로 프로젝트 정보(이름 포함) 및 요약을 수정할 때 사용하는 요청 DTO
      */
     @Getter
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SummaryUpdateRequest {
+
+        private String name;
+        private String subject;
+
         private String title;
         private String goal;
         private String teamSize;

@@ -36,7 +36,6 @@ public class ChatService {
     private final SimpMessageSendingOperations messagingTemplate;
     private final RestTemplate restTemplate;
 
-    // 정형 데이터 리포지토리
     private final ProjectSessionSummaryRepository summaryRepository;
 
     @Value("${external.api.fastapi.chat-url}")
@@ -136,6 +135,18 @@ public class ChatService {
     @Transactional
     protected void updateProjectSummary(Project project, String aiContent) {
         try {
+            // 1. AI 응답에서 제목 추출 및 프로젝트 이름 업데이트
+            if (aiContent.contains("제목 '") && aiContent.contains("'가 확인됐습니다")) {
+                int start = aiContent.indexOf("제목 '") + 4;
+                int end = aiContent.indexOf("'", start);
+                if (start > 3 && end > start) {
+                    String newName = aiContent.substring(start, end);
+                    project.updateName(newName);
+                    log.info("AI 응답을 통해 프로젝트 이름 변경 완료: {}", newName);
+                }
+            }
+
+            // 2. 정형 데이터 테이블(ProjectSessionSummary) 업데이트
             ProjectSessionSummary summary = summaryRepository.findByProject(project)
                     .orElseGet(() -> ProjectSessionSummary.builder()
                             .project(project)
@@ -143,7 +154,7 @@ public class ChatService {
                             .build());
 
             summary.updateAll(
-                    project.getName(),   // title
+                    project.getName(),
                     aiContent,           // goal
                     "논의 중",            // teamSize
                     "분석 중",            // roles
@@ -155,7 +166,7 @@ public class ChatService {
 
             summaryRepository.save(summary);
 
-            // 2. 상태 변경 (기획 완료 단계로 진입)
+            // 3. 상태 변경 (기획 완료 단계로 진입)
             if (aiContent.length() > 20) {
                 project.updateStatus("PLANNING_DONE");
             }

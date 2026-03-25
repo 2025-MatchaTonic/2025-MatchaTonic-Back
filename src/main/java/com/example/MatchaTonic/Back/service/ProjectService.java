@@ -25,7 +25,7 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
-    private final ProjectSessionSummaryRepository summaryRepository; // 정형 데이터 리포지토리 추가
+    private final ProjectSessionSummaryRepository summaryRepository;
 
     /**
      * 프로젝트 생성
@@ -58,7 +58,7 @@ public class ProjectService {
     }
 
     /**
-     * 내 프로젝트 목록 조회 (inviteCode 포함)
+     * 내 프로젝트 목록 조회
      */
     @Transactional(readOnly = true)
     public List<ProjectDto.ListResponse> getMyProjects(User user) {
@@ -76,7 +76,7 @@ public class ProjectService {
     }
 
     /**
-     * 초대코드로 프로젝트 참여
+     * 초대코드로 참여
      */
     public void joinProject(String inviteCode, User user) {
         Project project = projectRepository.findByInviteCode(inviteCode)
@@ -132,7 +132,7 @@ public class ProjectService {
     }
 
     /**
-     * 프로젝트 상세 조회 (정형화된 세션 요약 포함)
+     * 상세 조회
      */
     @Transactional(readOnly = true)
     public ProjectDto.DetailResponse getProjectDetail(Long projectId, User user) {
@@ -142,7 +142,6 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("해당 프로젝트에 접근 권한이 없습니다."));
 
-        // 정형 요약 데이터 조회 (없을 경우 빈 객체 처리)
         ProjectSessionSummary summary = summaryRepository.findByProject(project).orElse(null);
         ProjectDto.SessionSummaryDto summaryDto = null;
 
@@ -166,12 +165,12 @@ public class ProjectService {
                 .inviteCode(project.getInviteCode())
                 .status(project.getStatus())
                 .chatRoomId(project.getId())
-                .summary(summaryDto) // String 대신 DTO 전달
+                .summary(summaryDto)
                 .build();
     }
 
     /**
-     * 프로젝트 세션 요약 수동 업데이트 (정형 데이터 방식)
+     * 프로젝트 정보 및 요약 업데이트
      */
     public void updateSessionSummary(Long projectId, ProjectDto.SummaryUpdateRequest request, User user) {
         Project project = projectRepository.findById(projectId)
@@ -180,7 +179,15 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("업데이트 권한이 없습니다."));
 
-        // 기존 요약 정보를 찾거나 새로 생성
+        // 프로젝트 기본 정보 업데이트
+        if (request.getName() != null && !request.getName().isEmpty()) {
+            project.updateName(request.getName());
+        }
+        if (request.getSubject() != null) {
+            project.updateSubject(request.getSubject());
+        }
+
+        // 정형 요약 데이터 업데이트
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
                 .orElseGet(() -> ProjectSessionSummary.builder()
                         .project(project)
@@ -198,11 +205,12 @@ public class ProjectService {
         );
 
         summaryRepository.save(summary);
+        projectRepository.save(project);
 
         if (request.getGoal() != null && request.getGoal().length() > 5) {
             project.updateStatus("PLANNING_DONE");
         }
 
-        log.info("프로젝트 정형 요약 수동 업데이트 완료 - ID: {}, 유저: {}", projectId, user.getEmail());
+        log.info("프로젝트 정보 및 요약 업데이트 완료 - ID: {}, 이름: {}, 유저: {}", projectId, project.getName(), user.getEmail());
     }
 }
