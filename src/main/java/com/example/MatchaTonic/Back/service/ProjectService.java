@@ -113,35 +113,32 @@ public class ProjectService {
     // 프로젝트 삭제
     @Transactional
     public void deleteProject(Long projectId, User user) {
-        // 1. 삭제할 프로젝트가 있는지 확인
+        // 1. 프로젝트 조회
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
-        // 2. 권한 확인 (유저가 리더인지 확인)
+        // 2. 권한 확인
         if (project.getLeader() == null || !project.getLeader().getId().equals(user.getId())) {
             throw new IllegalStateException("프로젝트 삭제 권한이 없습니다.");
         }
 
-        log.info("프로젝트 완전 삭제 프로세스 시작 - ID: {}", projectId);
+        log.info("프로젝트 삭제 시도 - ID: {}", projectId);
 
-        // 3. 자식 데이터부터 순차적으로 물리 삭제
-
-        // (1) 요약 정보 삭제
+        // 3. 자식 데이터 삭제
         summaryRepository.findByProject(project).ifPresent(summaryRepository::delete);
-
-        // (2) 채팅 메시지 삭제
         projectRepository.deleteChatMessagesByProjectId(projectId);
-
-        // (3) 프로젝트 멤버 삭제
         projectMemberRepository.deleteMembersByProjectId(projectId);
 
-        // 4. 영속성 컨텍스트를 DB와 동기화
+        // 4. DB 반영 (자식 삭제 확정)
         projectRepository.flush();
 
         // 5. 프로젝트 삭제
         projectRepository.delete(project);
 
-        log.info("프로젝트 삭제 완료 - ID: {}", projectId);
+        // 6. 최종 반영 및 검증
+        projectRepository.flush();
+
+        log.info("프로젝트 삭제 최종 완료 - ID: {}", projectId);
     }
 
 
