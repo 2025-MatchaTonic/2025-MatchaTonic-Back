@@ -20,6 +20,7 @@ import java.util.Map;
 public class AiService {
 
     private final ProjectRepository projectRepository;
+    private final ProjectService projectService;
     private final NotionService notionService;
     private final RestTemplate restTemplate;
 
@@ -46,6 +47,10 @@ public class AiService {
                 log.error("AI 서버로부터 빈 응답을 받았습니다.");
                 throw new RuntimeException("AI 분석 결과가 비어있습니다.");
             }
+
+            //  AI 응답을 받은 즉시 우리 서비스 DB에 요약본 저장/업데이트
+            log.info("AI 분석 완료. DB 업데이트를 시작합니다. ProjectID: {}", request.projectId());
+            projectService.updateSummaryFromAi(request.projectId(), aiResponse);
 
         } catch (ResourceAccessException e) {
             log.error("AI 서버 연결 실패: {}", e.getMessage());

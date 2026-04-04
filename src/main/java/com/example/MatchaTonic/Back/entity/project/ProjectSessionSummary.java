@@ -33,16 +33,16 @@ public class ProjectSessionSummary {
     @Column(columnDefinition = "TEXT")
     private String roles;         // 역할 분담
 
-    private String dueDate;       // 마감 기한
+    private String dueDate;
 
     @Column(columnDefinition = "TEXT")
-    private String deliverables;  // 최종 결과물
+    private String deliverables;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "updated_by_id")
-    private User updatedBy;       // 마지막 수정자
+    private User updatedBy;
 
-    private String updatedSource; // "AI" 또는 "MANUAL"
+    private String updatedSource;
 
     @UpdateTimestamp
     private LocalDateTime updatedAt;

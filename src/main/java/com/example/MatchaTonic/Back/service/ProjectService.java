@@ -1,5 +1,6 @@
 package com.example.MatchaTonic.Back.service;
 
+import com.example.MatchaTonic.Back.dto.AiResponseDto;
 import com.example.MatchaTonic.Back.dto.MemberDto;
 import com.example.MatchaTonic.Back.dto.ProjectDto;
 import com.example.MatchaTonic.Back.entity.login.User;
@@ -113,34 +114,25 @@ public class ProjectService {
     // 프로젝트 삭제
     @Transactional
     public void deleteProject(Long projectId, User user) {
-        // 1. 프로젝트 조회
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
-        // 2. 권한 확인
         if (project.getLeader() == null || !project.getLeader().getId().equals(user.getId())) {
             throw new IllegalStateException("프로젝트 삭제 권한이 없습니다.");
         }
 
         log.info("프로젝트 삭제 시도 - ID: {}", projectId);
 
-        // 3. 자식 데이터 삭제
         summaryRepository.findByProject(project).ifPresent(summaryRepository::delete);
         projectRepository.deleteChatMessagesByProjectId(projectId);
         projectMemberRepository.deleteMembersByProjectId(projectId);
 
-        // 4. DB 반영 (자식 삭제 확정)
         projectRepository.flush();
-
-        // 5. 프로젝트 삭제
         projectRepository.delete(project);
-
-        // 6. 최종 반영 및 검증
         projectRepository.flush();
 
         log.info("프로젝트 삭제 최종 완료 - ID: {}", projectId);
     }
-
 
     // 상세조회
     @Transactional(readOnly = true)
@@ -151,7 +143,6 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("해당 프로젝트에 접근 권한이 없습니다."));
 
-        // DB에서 요약 정보를 직접 조회
         ProjectSessionSummary summary = summaryRepository.findByProject(project).orElse(null);
         ProjectDto.SessionSummaryDto summaryDto = null;
 
@@ -178,7 +169,6 @@ public class ProjectService {
                 .summary(summaryDto)
                 .build();
     }
-
 
     // 프로젝트 정보 및 요약 업데이트
     public void updateSessionSummary(Long projectId, ProjectDto.SummaryUpdateRequest request, User user) {
@@ -221,5 +211,35 @@ public class ProjectService {
         }
 
         log.info("수동 업데이트 완료 - 프로젝트ID: {}, 업데이트 소스: MANUAL", projectId);
+    }
+
+    // AI 분석 결과 DB 업데이트 로직
+    @Transactional
+    public void updateSummaryFromAi(Long projectId, AiResponseDto aiResponse) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
+
+        if (aiResponse.templates() == null || aiResponse.templates().isEmpty()) return;
+        AiResponseDto.TemplateDto template = aiResponse.templates().get(0);
+
+        ProjectSessionSummary summary = summaryRepository.findByProject(project)
+                .orElseGet(() -> ProjectSessionSummary.builder()
+                        .project(project)
+                        .build());
+
+        // AI 데이터 매핑
+        summary.updateAll(
+                template.title() != null ? template.title() : project.getName(),
+                String.valueOf(template.content()), // content를 목표(goal)로 매핑
+                "미지정",
+                "AI 분석 역할",
+                "기한 미정",
+                "AI 생성 결과물",
+                project.getLeader(),
+                "AI"
+        );
+
+        summaryRepository.save(summary);
+        log.info("AI 자동 요약 업데이트 완료 - 프로젝트ID: {}, Source: AI", projectId);
     }
 }
