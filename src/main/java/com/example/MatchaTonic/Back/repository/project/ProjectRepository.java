@@ -11,7 +11,7 @@ import java.util.Optional;
 public interface ProjectRepository extends JpaRepository<Project, Long> {
     Optional<Project> findByInviteCode(String inviteCode);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Modifying
     @Query("DELETE FROM ChatMessage c WHERE c.project.id = :projectId")
     void deleteChatMessagesByProjectId(@Param("projectId") Long projectId);
 }

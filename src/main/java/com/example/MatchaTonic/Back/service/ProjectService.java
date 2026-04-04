@@ -113,36 +113,37 @@ public class ProjectService {
     // 프로젝트 삭제
     @Transactional
     public void deleteProject(Long projectId, User user) {
+        // 1. 삭제할 프로젝트가 있는지 확인
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
-        if (!project.getLeader().getId().equals(user.getId())) {
+        // 2. 권한 확인 (유저가 리더인지 확인)
+        if (project.getLeader() == null || !project.getLeader().getId().equals(user.getId())) {
             throw new IllegalStateException("프로젝트 삭제 권한이 없습니다.");
         }
 
-        log.info("프로젝트 강제 삭제 시작 - ID: {}", projectId);
+        log.info("프로젝트 완전 삭제 프로세스 시작 - ID: {}", projectId);
 
-        // 1. 요약 정보 삭제
+        // 3. 자식 데이터부터 순차적으로 물리 삭제
+
+        // (1) 요약 정보 삭제
         summaryRepository.findByProject(project).ifPresent(summaryRepository::delete);
 
-        // 2. 채팅 메시지 '벌크' 삭제 (DB에서 직접 제거)
+        // (2) 채팅 메시지 삭제
         projectRepository.deleteChatMessagesByProjectId(projectId);
 
-        // 3. 멤버 삭제
-        projectMemberRepository.deleteByProject(project);
+        // (3) 프로젝트 멤버 삭제
+        projectMemberRepository.deleteMembersByProjectId(projectId);
 
-        // 4.영속성 컨텍스트에 남은 프로젝트 객체를 강제로 비우거나, 자식과의 연결 고리를 메모리에서 끊기
-        project.getChatMessages().clear();
-        project.getMembers().clear();
-
-        // 5. DB 반영
+        // 4. 영속성 컨텍스트를 DB와 동기화
         projectRepository.flush();
 
-        // 6. 부모 삭제
+        // 5. 프로젝트 삭제
         projectRepository.delete(project);
 
-        log.info("프로젝트 최종 삭제 성공 - ID: {}", projectId);
+        log.info("프로젝트 삭제 완료 - ID: {}", projectId);
     }
+
 
     // 상세조회
     @Transactional(readOnly = true)
