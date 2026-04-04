@@ -78,11 +78,9 @@ public class ChatService {
                     .filter(msg -> msg != null && !msg.isBlank())
                     .collect(Collectors.toList());
 
-            // DB에 저장된 AI 상태와 누적 데이터 로드 (Map<String, Object>)
             String currentStatus = project.getAiCurrentStatus();
             Map<String, Object> collectedData = project.getAiCollectedDataMap();
 
-            // 방 이름 오염 방지: title이 비어있다면 빈 값으로 유지
             if (!collectedData.containsKey("title")) {
                 collectedData.put("title", "");
             }
@@ -102,7 +100,6 @@ public class ChatService {
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
             if (response != null) {
-                // AI 응답에서 받은 새로운 상태와 데이터를 DB에 업데이트
                 String newStatus = response.currentStatus();
                 String newCollectedDataJson = objectMapper.writeValueAsString(response.collectedData());
                 project.updateAiContext(newStatus, newCollectedDataJson);
@@ -127,6 +124,29 @@ public class ChatService {
             }
         } catch (Exception e) {
             log.error("AI 응답 처리 오류: {}", e.getMessage());
+        }
+    }
+
+    @Transactional
+    public void checkSubjectAndInitiateAI(Long projectId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
+
+        long messageCount = chatMessageRepository.countByProjectId(projectId);
+
+        // 메시지가 하나도 없고, 주제가 아직 비어있다면 AI가 먼저 말을 겁니다.
+        if (messageCount == 0 && (project.getSubject() == null || project.getSubject().isEmpty() || project.getSubject().contains("주제를 입력해주세요"))) {
+            ChatMessageDto aiMsg = ChatMessageDto.builder()
+                    .type(ChatMessageDto.MessageType.SYSTEM)
+                    .projectId(projectId)
+                    .senderName("Promate AI")
+                    .senderEmail("ai@promate.ai")
+                    .message("반가워요! 아직 프로젝트 주제가 정해지지 않았네요. 어떤 아이디어를 가지고 계신가요? @mates를 붙여 저를 불러주세요!")
+                    .timestamp(LocalDateTime.now())
+                    .build();
+
+            saveToDb(aiMsg, project);
+            messagingTemplate.convertAndSend("/sub/project/" + projectId, aiMsg);
         }
     }
 
@@ -157,11 +177,21 @@ public class ChatService {
         if (dto.getSenderEmail() != null && !dto.getSenderEmail().isBlank()) {
             sender = userRepository.findByEmail(dto.getSenderEmail()).orElse(null);
         }
+
+        ChatMessage.MessageType entityType = ChatMessage.MessageType.TALK;
+        if (dto.getType() != null) {
+            try {
+                entityType = ChatMessage.MessageType.valueOf(dto.getType().name());
+            } catch (Exception e) {
+                entityType = ChatMessage.MessageType.TALK;
+            }
+        }
+
         ChatMessage chatMessage = ChatMessage.builder()
                 .project(project)
                 .sender(sender)
                 .message(dto.getMessage())
-                .type(ChatMessage.MessageType.TALK)
+                .type(entityType)
                 .build();
         chatMessageRepository.save(chatMessage);
     }
