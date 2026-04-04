@@ -82,24 +82,24 @@ public class ChatService {
 
             // 1. 기존 JSON 데이터 가져오기 + [로그 1]
             Map<String, Object> collectedData = project.getAiCollectedDataMap();
-            log.info("[CHECK 1] DB에서 꺼낸 순수 JSON 데이터: {}", collectedData);
+            log.info("[CHECK 1] DB Pure JSON: {}", collectedData);
 
             // 2. 수동 수정된 데이터 Merge + [로그 2]
             summaryRepository.findByProject(project).ifPresentOrElse(
                     summary -> {
                         Map<String, Object> manualData = summary.toDataMap();
-                        log.info("[CHECK 2] Summary 테이블에서 가져온 데이터: {}", manualData);
+                        log.info("[CHECK 2] Summary table data: {}", manualData);
                         collectedData.putAll(manualData);
                     },
-                    () -> log.warn("[CHECK 2] Summary 테이블에 이 프로젝트(ID: {})의 데이터가 없습니다.", project.getId())
+                    () -> log.warn("[CHECK 2] No Summary row found for Project: {}", project.getId())
             );
-
-            // [로그 3] Merge 완료 후 데이터 상태
-            log.info("[CHECK 3] 최종 병합된 collectedData: {}", collectedData);
 
             if (!collectedData.containsKey("title")) {
                 collectedData.put("title", project.getName());
             }
+
+            // [로그 3] 병합 완료 후의 최종 맵 상태
+            log.info("[CHECK 3] Final Merged Data to be sent: {}", collectedData);
 
             AiChatRequestDto request = AiChatRequestDto.builder()
                     .projectId(project.getId())
@@ -111,9 +111,6 @@ public class ChatService {
                     .selectedMessage(userDto.getMessage())
                     .selectedAnswers(recentMessages)
                     .build();
-
-            // [로그 4] 실제 전송 직전 DTO 내부 데이터 확인
-            log.info("[CHECK 4] FastAPI로 전송될 최종 collectedData: {}", request.getCollectedData());
 
             log.info("AI 호출 (상태: {}): {}", currentStatus, aiChatUrl);
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
@@ -136,7 +133,7 @@ public class ChatService {
                 }
             }
         } catch (Exception e) {
-            log.error("AI 응답 처리 오류: {}", e.getMessage());
+            log.error("AI 응답 처리 오류: {}", e.getMessage(), e);
         }
     }
 
