@@ -71,6 +71,7 @@ public class ProjectService {
                         .status(pm.getProject().getStatus())
                         .chatRoomId(pm.getProject().getId())
                         .inviteCode(pm.getProject().getInviteCode())
+                        .createdAt(pm.getProject().getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
     }

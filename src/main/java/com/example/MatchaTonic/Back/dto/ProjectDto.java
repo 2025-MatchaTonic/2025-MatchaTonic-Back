@@ -42,6 +42,7 @@ public class ProjectDto {
         private String status;
         private Long chatRoomId;
         private String inviteCode;
+        private LocalDateTime createdAt;
     }
 
     @Getter
