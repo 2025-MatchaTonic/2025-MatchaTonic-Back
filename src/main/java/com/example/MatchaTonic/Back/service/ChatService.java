@@ -11,6 +11,7 @@ import com.example.MatchaTonic.Back.repository.login.UserRepository;
 import com.example.MatchaTonic.Back.repository.project.ChatMessageRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectSessionSummaryRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -35,15 +35,12 @@ public class ChatService {
     private final UserRepository userRepository;
     private final SimpMessageSendingOperations messagingTemplate;
     private final RestTemplate restTemplate;
-
     private final ProjectSessionSummaryRepository summaryRepository;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${external.api.fastapi.chat-url}")
     private String aiChatUrl;
 
-    /**
-     * 메시지 저장 및 브로드캐스팅
-     */
     @Transactional
     public void saveAndSendMessage(ChatMessageDto dto) {
         Project project = projectRepository.findById(dto.getProjectId())
@@ -57,12 +54,10 @@ public class ChatService {
             saveToDb(dto, project);
         }
 
-
         if (dto.getTimestamp() == null) {
             dto.setTimestamp(LocalDateTime.now());
         }
 
-        log.info("Broadcasting message to /sub/project/{}", dto.getProjectId());
         messagingTemplate.convertAndSend("/sub/project/" + dto.getProjectId(), dto);
 
         boolean isTalk = ChatMessageDto.MessageType.TALK.equals(dto.getType());
@@ -70,7 +65,6 @@ public class ChatService {
         boolean hasAiMention = dto.getMessage() != null && dto.getMessage().contains("@mates");
 
         if (isTalk && isNotAi && hasAiMention) {
-            log.info("AI 호출 조건을 만족함 (@mates 감지): 프로젝트ID={}", project.getId());
             callAiAndBroadcast(project, dto);
         }
     }
@@ -84,88 +78,77 @@ public class ChatService {
                     .filter(msg -> msg != null && !msg.isBlank())
                     .collect(Collectors.toList());
 
-            Map<String, String> collectedData = new HashMap<>();
-            collectedData.put("title", project.getName() != null ? project.getName() : "");
-            collectedData.put("goal", project.getSubject() != null ? project.getSubject() : "");
+            // DB에 저장된 AI 상태와 누적 데이터 로드 (Map<String, Object>)
+            String currentStatus = project.getAiCurrentStatus();
+            Map<String, Object> collectedData = project.getAiCollectedDataMap();
 
-            AiChatRequestDto request = new AiChatRequestDto(
-                    project.getId(), userDto.getMessage(), "CHAT", "EXPLORE",
-                    collectedData, recentMessages, userDto.getMessage(), recentMessages
-            );
+            // 방 이름 오염 방지: title이 비어있다면 빈 값으로 유지
+            if (!collectedData.containsKey("title")) {
+                collectedData.put("title", "");
+            }
 
-            log.info("AI 서버 요청 전송: {}", aiChatUrl);
+            AiChatRequestDto request = AiChatRequestDto.builder()
+                    .projectId(project.getId())
+                    .content(userDto.getMessage())
+                    .actionType("CHAT")
+                    .currentStatus(currentStatus)
+                    .collectedData(collectedData)
+                    .recentMessages(recentMessages)
+                    .selectedMessage(userDto.getMessage())
+                    .selectedAnswers(recentMessages)
+                    .build();
+
+            log.info("AI 호출 (상태: {}): {}", currentStatus, aiChatUrl);
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
-            if (response != null && response.content() != null) {
-                String aiContent = response.content();
+            if (response != null) {
+                // AI 응답에서 받은 새로운 상태와 데이터를 DB에 업데이트
+                String newStatus = response.currentStatus();
+                String newCollectedDataJson = objectMapper.writeValueAsString(response.collectedData());
+                project.updateAiContext(newStatus, newCollectedDataJson);
+                projectRepository.save(project);
 
-                ChatMessageDto aiDto = ChatMessageDto.builder()
-                        .type(ChatMessageDto.MessageType.SYSTEM)
-                        .projectId(project.getId())
-                        .senderName("Promate AI")
-                        .senderEmail("ai@promate.ai")
-                        .message(aiContent)
-                        .timestamp(LocalDateTime.now()) // createdAt -> timestamp
-                        .build();
+                if (response.content() != null) {
+                    ChatMessageDto aiDto = ChatMessageDto.builder()
+                            .type(ChatMessageDto.MessageType.SYSTEM)
+                            .projectId(project.getId())
+                            .senderName("Promate AI")
+                            .senderEmail("ai@promate.ai")
+                            .message(response.content())
+                            .timestamp(LocalDateTime.now())
+                            .build();
 
-                saveToDb(aiDto, project);
-
-                if (shouldUpdateSummary(aiContent)) {
-                    updateProjectSummary(project, aiContent);
+                    saveToDb(aiDto, project);
+                    if (shouldUpdateSummary(response.content())) {
+                        updateProjectSummary(project, response.content());
+                    }
+                    messagingTemplate.convertAndSend("/sub/project/" + project.getId(), aiDto);
                 }
-
-                messagingTemplate.convertAndSend("/sub/project/" + project.getId(), aiDto);
             }
         } catch (Exception e) {
-            log.error("AI 응답 처리 중 오류 발생: {}", e.getMessage());
+            log.error("AI 응답 처리 오류: {}", e.getMessage());
         }
     }
 
     private boolean shouldUpdateSummary(String content) {
         if (content == null) return false;
-        return content.contains("요약") || content.contains("결정") ||
-                content.contains("확정") || content.contains("정리") ||
-                content.contains("선정") || content.length() > 100;
+        return content.contains("요약") || content.contains("결정") || content.contains("확정") || content.length() > 100;
     }
 
     @Transactional
     protected void updateProjectSummary(Project project, String aiContent) {
         try {
-            if (aiContent.contains("제목 '") && aiContent.contains("'가 확인됐습니다")) {
-                int start = aiContent.indexOf("제목 '") + 4;
-                int end = aiContent.indexOf("'", start);
-                if (start > 3 && end > start) {
-                    String newName = aiContent.substring(start, end);
-                    project.updateName(newName);
-                }
-            }
-
             ProjectSessionSummary summary = summaryRepository.findByProject(project)
                     .orElseGet(() -> ProjectSessionSummary.builder()
                             .project(project)
                             .updatedSource("AI")
                             .build());
 
-            summary.updateAll(
-                    project.getName(),
-                    aiContent,
-                    "논의 중",
-                    "분석 중",
-                    "미정",
-                    "기획안",
-                    null,
-                    "AI"
-            );
-
+            summary.updateAll(project.getName(), aiContent, "논의 중", "분석 중", "미정", "기획안", null, "AI");
             summaryRepository.save(summary);
-
-            if (aiContent.length() > 20) {
-                project.updateStatus("PLANNING_DONE");
-            }
-
             projectRepository.save(project);
         } catch (Exception e) {
-            log.error("세션 요약 데이터 저장 실패: {}", e.getMessage());
+            log.error("요약 저장 실패: {}", e.getMessage());
         }
     }
 
@@ -174,46 +157,13 @@ public class ChatService {
         if (dto.getSenderEmail() != null && !dto.getSenderEmail().isBlank()) {
             sender = userRepository.findByEmail(dto.getSenderEmail()).orElse(null);
         }
-
-        ChatMessage.MessageType entityType = ChatMessage.MessageType.TALK;
-        if (dto.getType() != null) {
-            try {
-                entityType = ChatMessage.MessageType.valueOf(dto.getType().name());
-            } catch (Exception e) {
-                entityType = ChatMessage.MessageType.TALK;
-            }
-        }
-
         ChatMessage chatMessage = ChatMessage.builder()
                 .project(project)
                 .sender(sender)
                 .message(dto.getMessage())
-                .type(entityType)
+                .type(ChatMessage.MessageType.TALK)
                 .build();
-
         chatMessageRepository.save(chatMessage);
-    }
-
-    @Transactional
-    public void checkSubjectAndInitiateAI(Long projectId) {
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다."));
-
-        long messageCount = chatMessageRepository.countByProjectId(projectId);
-
-        if (messageCount == 0 && (project.getSubject() == null || project.getSubject().isEmpty())) {
-            ChatMessageDto aiMsg = ChatMessageDto.builder()
-                    .type(ChatMessageDto.MessageType.SYSTEM)
-                    .projectId(projectId)
-                    .senderName("Promate AI")
-                    .senderEmail("ai@promate.ai")
-                    .message("반가워요! 아직 프로젝트 주제가 정해지지 않았네요. 어떤 아이디어를 가지고 계신가요?")
-                    .timestamp(LocalDateTime.now())
-                    .build();
-
-            saveToDb(aiMsg, project);
-            messagingTemplate.convertAndSend("/sub/project/" + projectId, aiMsg);
-        }
     }
 
     @Transactional(readOnly = true)

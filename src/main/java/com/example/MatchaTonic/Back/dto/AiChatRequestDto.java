@@ -11,7 +11,7 @@ public record AiChatRequestDto(
         String content,
         String actionType,
         String currentStatus,
-        Map<String, String> collectedData,
+        Map<String, Object> collectedData,
         List<String> recentMessages,
         String selectedMessage,
         List<String> selectedAnswers

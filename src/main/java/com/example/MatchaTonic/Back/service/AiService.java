@@ -28,66 +28,41 @@ public class AiService {
     private String fastApiUrl;
 
     public void processAndExport(ExportRequestDto request) {
-        // 1. 기초 데이터 조회
         Project project = projectRepository.findById(request.projectId())
-                .orElseThrow(() -> new RuntimeException("해당 프로젝트를 찾을 수 없습니다. ID: " + request.projectId()));
+                .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다. ID: " + request.projectId()));
 
-        // 2. AI 서버 전송용 Payload 조립
         Map<String, Object> aiRequestPayload = createAiRequestPayload(project, request);
-
         AiResponseDto aiResponse;
 
         try {
-            log.info("FastAPI 분석 요청 시작 - ProjectID: {}, Endpoint: {}", request.projectId(), fastApiUrl);
-
-            // 3. FastAPI 호출
+            log.info("FastAPI 분석 요청 - ProjectID: {}", request.projectId());
             aiResponse = restTemplate.postForObject(fastApiUrl, aiRequestPayload, AiResponseDto.class);
 
-            if (aiResponse == null || aiResponse.templates() == null || aiResponse.templates().isEmpty()) {
-                log.error("AI 서버로부터 빈 응답을 받았습니다.");
-                throw new RuntimeException("AI 분석 결과가 비어있습니다.");
+            if (aiResponse != null && aiResponse.templates() != null) {
+                projectService.updateSummaryFromAi(request.projectId(), aiResponse);
+                notionService.createProjectPagesOnNotion(aiResponse, request.notionToken(), request.pageUrl());
             }
-
-            // AI 응답을 받은 즉시 우리 서비스 DB에 요약본 저장/업데이트
-            log.info("AI 분석 완료. DB 업데이트를 시작합니다. ProjectID: {}", request.projectId());
-            projectService.updateSummaryFromAi(request.projectId(), aiResponse);
-
-        } catch (ResourceAccessException e) {
-            log.error("AI 서버 연결 실패: {}", e.getMessage());
-            throw new RuntimeException("AI 분석 서버와 통신할 수 없습니다.");
         } catch (Exception e) {
             log.error("AI 분석 중 오류 발생: {}", e.getMessage());
-            throw new RuntimeException("AI 분석 처리 중 오류가 발생했습니다.");
-        }
-
-        // 4. NotionService 호출
-        try {
-            log.info("노션 내보내기 시작 - Project: {}, Target URL: {}", project.getName(), request.pageUrl());
-            notionService.createProjectPagesOnNotion(aiResponse, request.notionToken(), request.pageUrl());
-        } catch (Exception e) {
-            log.error("노션 내보내기 실패: {}", e.getMessage());
-            throw new RuntimeException("노션 연동 중 오류 발생: " + e.getMessage());
+            throw new RuntimeException("AI 처리 실패");
         }
     }
 
     private Map<String, Object> createAiRequestPayload(Project project, ExportRequestDto request) {
         Map<String, Object> payload = new HashMap<>();
-
         payload.put("projectId", project.getId());
         payload.put("templateType", request.templateType() != null ? request.templateType() : "plan");
-        payload.put("currentStatus", project.getStatus() != null ? project.getStatus() : "READY");
+
+        // DB에 저장된 최신 상태와 데이터 사용
+        payload.put("currentStatus", project.getAiCurrentStatus());
         payload.put("content", request.content() != null ? request.content() : "템플릿 생성 요청");
 
-        Map<String, String> collectedData = new HashMap<>();
+        Map<String, Object> collectedData = project.getAiCollectedDataMap();
 
-        // AI가 대화 내용을 바탕으로 직접 제목을 결정할 수 있도록 빈 값을 보냄
-        collectedData.put("title", "");
-
-        collectedData.put("goal", project.getSubject() != null ? project.getSubject() : "");
-        collectedData.put("teamSize", "미지정");
-        collectedData.put("roles", "미지정");
-        collectedData.put("deliverables", "기획/개발 산출물");
-        collectedData.put("dueDate", project.getCreatedAt() != null ? project.getCreatedAt().toString() : "");
+        // title이 난수 방 이름이면 비워줌
+        if (!collectedData.containsKey("title") || String.valueOf(collectedData.get("title")).contains(project.getName())) {
+            collectedData.put("title", "");
+        }
 
         payload.put("collectedData", collectedData);
         payload.put("recentMessages", request.selectedAnswers());
