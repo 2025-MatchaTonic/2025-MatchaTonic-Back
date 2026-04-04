@@ -80,13 +80,22 @@ public class ChatService {
 
             String currentStatus = project.getAiCurrentStatus();
 
-            // 1. 기존 JSON 데이터 가져오기
+            // 1. 기존 JSON 데이터 가져오기 + [로그 1]
             Map<String, Object> collectedData = project.getAiCollectedDataMap();
+            log.info("[CHECK 1] DB에서 꺼낸 순수 JSON 데이터: {}", collectedData);
 
-            // 2.  수동 수정된 최신 세션 요약 데이터가 있다면 JSON 데이터에 Merge
-            summaryRepository.findByProject(project).ifPresent(summary -> {
-                collectedData.putAll(summary.toDataMap());
-            });
+            // 2. 수동 수정된 데이터 Merge + [로그 2]
+            summaryRepository.findByProject(project).ifPresentOrElse(
+                    summary -> {
+                        Map<String, Object> manualData = summary.toDataMap();
+                        log.info("[CHECK 2] Summary 테이블에서 가져온 데이터: {}", manualData);
+                        collectedData.putAll(manualData);
+                    },
+                    () -> log.warn("[CHECK 2] Summary 테이블에 이 프로젝트(ID: {})의 데이터가 없습니다.", project.getId())
+            );
+
+            // [로그 3] Merge 완료 후 데이터 상태
+            log.info("[CHECK 3] 최종 병합된 collectedData: {}", collectedData);
 
             if (!collectedData.containsKey("title")) {
                 collectedData.put("title", project.getName());
@@ -103,11 +112,13 @@ public class ChatService {
                     .selectedAnswers(recentMessages)
                     .build();
 
+            // [로그 4] 실제 전송 직전 DTO 내부 데이터 확인
+            log.info("[CHECK 4] FastAPI로 전송될 최종 collectedData: {}", request.getCollectedData());
+
             log.info("AI 호출 (상태: {}): {}", currentStatus, aiChatUrl);
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
             if (response != null) {
-                // 3. [수정 포인트] 응답받은 최신 데이터를 Project JSON 컬럼과 요약 테이블 양쪽 모두에 반영
                 updateProjectAndSummary(project, response);
 
                 if (response.content() != null) {
@@ -133,13 +144,11 @@ public class ChatService {
     @Transactional
     protected void updateProjectAndSummary(Project project, AiChatResponseDto response) {
         try {
-            // 1. Project 엔티티의 AI 컨텍스트(JSON) 업데이트
             String newStatus = response.currentStatus();
             String newCollectedDataJson = objectMapper.writeValueAsString(response.collectedData());
             project.updateAiContext(newStatus, newCollectedDataJson);
             projectRepository.save(project);
 
-            // 2. ProjectSessionSummary 테이블 필드 단위 동기화
             Map<String, Object> data = response.collectedData();
             ProjectSessionSummary summary = summaryRepository.findByProject(project)
                     .orElseGet(() -> ProjectSessionSummary.builder().project(project).build());
