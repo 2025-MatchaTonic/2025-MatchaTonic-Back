@@ -10,12 +10,14 @@ import com.example.MatchaTonic.Back.entity.project.ProjectSessionSummary;
 import com.example.MatchaTonic.Back.repository.project.ProjectMemberRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectSessionSummaryRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -27,6 +29,7 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final ProjectSessionSummaryRepository summaryRepository;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // 프로젝트 생성
     public ProjectDto.CreateResponse createProject(ProjectDto.CreateRequest request, User leader) {
@@ -170,7 +173,8 @@ public class ProjectService {
                 .build();
     }
 
-    // 프로젝트 정보 및 요약 업데이트
+    // 프로젝트 정보 및 세션 요약 수동 업데이트 (AI 분석 결과와 동기화 포함)
+    @Transactional
     public void updateSessionSummary(Long projectId, ProjectDto.SummaryUpdateRequest request, User user) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
@@ -178,6 +182,7 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("업데이트 권한이 없습니다."));
 
+        // 1. 프로젝트 기본 정보 업데이트
         if (request.getName() != null && !request.getName().isEmpty()) {
             project.updateName(request.getName());
         }
@@ -185,6 +190,7 @@ public class ProjectService {
             project.updateSubject(request.getSubject());
         }
 
+        // 2. 세션 요약 테이블 업데이트
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
                 .orElseGet(() -> ProjectSessionSummary.builder()
                         .project(project)
@@ -203,6 +209,18 @@ public class ProjectService {
                 "MANUAL"
         );
 
+        // 3. 수동 수정본을 AI CollectedData에도 반영하여 동기화
+        Map<String, Object> aiData = project.getAiCollectedDataMap();
+        if (request.getGoal() != null) aiData.put("goal", request.getGoal());
+        if (request.getTitle() != null) aiData.put("title", request.getTitle());
+
+        try {
+            String updatedAiDataJson = objectMapper.writeValueAsString(aiData);
+            project.updateAiContext(project.getAiCurrentStatus(), updatedAiDataJson);
+        } catch (Exception e) {
+            log.error("AI 데이터 동기화 실패: {}", e.getMessage());
+        }
+
         summaryRepository.save(summary);
         projectRepository.save(project);
 
@@ -210,7 +228,7 @@ public class ProjectService {
             project.updateStatus("PLANNING_DONE");
         }
 
-        log.info("수동 업데이트 완료 - 프로젝트ID: {}, 업데이트 소스: MANUAL", projectId);
+        log.info("수동 업데이트 완료 및 AI 컨텍스트 동기화 - 프로젝트ID: {}", projectId);
     }
 
     // AI 분석 결과 DB 업데이트 로직
@@ -227,10 +245,9 @@ public class ProjectService {
                         .project(project)
                         .build());
 
-        // AI 데이터 매핑
         summary.updateAll(
                 template.title() != null ? template.title() : project.getName(),
-                String.valueOf(template.content()), // content를 목표(goal)로 매핑
+                template.content() != null ? String.valueOf(template.content()) : "",
                 "미지정",
                 "AI 분석 역할",
                 "기한 미정",

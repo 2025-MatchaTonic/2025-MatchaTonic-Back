@@ -8,5 +8,5 @@ public record AiChatResponseDto(
         List<String> suggestedQuestions,
         String currentStatus,
         boolean isSufficient,
-        Map<String, String> collectedData
+        Map<String, Object> collectedData
 ) {}
