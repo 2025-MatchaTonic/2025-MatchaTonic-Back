@@ -116,26 +116,29 @@ public class ProjectService {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
-        // 리더 권한 확인
         if (!project.getLeader().getId().equals(user.getId())) {
             throw new IllegalStateException("프로젝트 삭제 권한이 없습니다.");
         }
 
-        log.info("프로젝트 삭제 시작 - ID: {}", projectId);
+        log.info("프로젝트 강제 삭제 시작 - ID: {}", projectId);
 
-        // 1. 연관된 자식 엔티티들과의 관계 끊기
-        project.getChatMessages().clear(); // 채팅 메시지 비우기
-        project.getMembers().clear();      // 멤버 리스트 비우기
+        // 1. 요약 정보 삭제
+        summaryRepository.findByProject(project).ifPresent(summaryRepository::delete);
 
-        // 2. 변경 사항을 DB에 먼저 반영하여 자식 레코드 삭제
+        // 2. 채팅 메시지 삭제 (Repository의 Modifying 쿼리 호출)
+        projectRepository.deleteChatMessagesByProjectId(projectId);
+
+        // 3. 멤버 삭제
+        projectMemberRepository.deleteByProject(project);
+
+        // 4. 영속성 컨텍스트 반영 및 초기화
         projectRepository.flush();
 
-        // 3. 부모 엔티티 삭제
+        // 5. 부모 엔티티 삭제
         projectRepository.delete(project);
 
-        log.info("프로젝트 삭제 완료 - ID: {}", projectId);
+        log.info("프로젝트 최종 삭제 완료 - ID: {}", projectId);
     }
-
     // 상세조회
     @Transactional(readOnly = true)
     public ProjectDto.DetailResponse getProjectDetail(Long projectId, User user) {

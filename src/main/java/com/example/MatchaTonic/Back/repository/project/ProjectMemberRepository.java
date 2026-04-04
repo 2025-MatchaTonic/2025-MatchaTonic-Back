@@ -8,11 +8,13 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ProjectMemberRepository extends JpaRepository<ProjectMember, Long> {
-    // 특정 유저가 속한 모든 프로젝트 멤버십 조회 (HOME-01)
+    // 특정 유저가 속한 모든 프로젝트 조회
     List<ProjectMember> findByUser(User user);
 
-    // 특정 프로젝트에 속한 모든 멤버 조회 (HOME-04)
+    // 특정 프로젝트에 속한 모든 멤버 조회
     List<ProjectMember> findByProject(Project project);
 
     Optional<ProjectMember> findByUserAndProject(User user, Project project);
+
+    void deleteByProject(Project project);
 }
