@@ -48,7 +48,7 @@ public class AiService {
                 throw new RuntimeException("AI 분석 결과가 비어있습니다.");
             }
 
-            //  AI 응답을 받은 즉시 우리 서비스 DB에 요약본 저장/업데이트
+            // AI 응답을 받은 즉시 우리 서비스 DB에 요약본 저장/업데이트
             log.info("AI 분석 완료. DB 업데이트를 시작합니다. ProjectID: {}", request.projectId());
             projectService.updateSummaryFromAi(request.projectId(), aiResponse);
 
@@ -79,7 +79,10 @@ public class AiService {
         payload.put("content", request.content() != null ? request.content() : "템플릿 생성 요청");
 
         Map<String, String> collectedData = new HashMap<>();
-        collectedData.put("title", project.getName());
+
+        // AI가 대화 내용을 바탕으로 직접 제목을 결정할 수 있도록 빈 값을 보냄
+        collectedData.put("title", "");
+
         collectedData.put("goal", project.getSubject() != null ? project.getSubject() : "");
         collectedData.put("teamSize", "미지정");
         collectedData.put("roles", "미지정");
