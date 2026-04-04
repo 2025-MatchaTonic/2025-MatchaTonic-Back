@@ -27,9 +27,7 @@ public class ProjectService {
     private final ProjectMemberRepository projectMemberRepository;
     private final ProjectSessionSummaryRepository summaryRepository;
 
-    /**
-     * 프로젝트 생성
-     */
+    // 프로젝트 생성
     public ProjectDto.CreateResponse createProject(ProjectDto.CreateRequest request, User leader) {
         Project project = Project.builder()
                 .name(request.getName())
@@ -57,9 +55,7 @@ public class ProjectService {
                 .build();
     }
 
-    /**
-     * 내 프로젝트 목록 조회
-     */
+    // 내 프로젝트 목록 조회
     @Transactional(readOnly = true)
     public List<ProjectDto.ListResponse> getMyProjects(User user) {
         return projectMemberRepository.findByUser(user).stream()
@@ -76,9 +72,7 @@ public class ProjectService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * 초대코드로 참여
-     */
+    // 초대 코드로 프로젝트 참여
     public void joinProject(String inviteCode, User user) {
         Project project = projectRepository.findByInviteCode(inviteCode)
                 .orElseThrow(() -> new IllegalArgumentException("유효하지 않은 초대 코드입니다."));
@@ -96,9 +90,7 @@ public class ProjectService {
         projectMemberRepository.save(projectMember);
     }
 
-    /**
-     * 팀원 목록 조회
-     */
+    // 팀원 목록 조회
     @Transactional(readOnly = true)
     public ProjectDto.TeamResponse getProjectMembers(Long projectId) {
         Project project = projectRepository.findById(projectId)
@@ -118,23 +110,33 @@ public class ProjectService {
                 .build();
     }
 
-    /**
-     * 프로젝트 삭제
-     */
+    // 프로젝트 삭제
+    @Transactional
     public void deleteProject(Long projectId, User user) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
+        // 리더 권한 확인
         if (!project.getLeader().getId().equals(user.getId())) {
             throw new IllegalStateException("프로젝트 삭제 권한이 없습니다.");
         }
 
+        log.info("프로젝트 삭제 시작 - ID: {}", projectId);
+
+        // 1. 연관된 자식 엔티티들과의 관계 끊기
+        project.getChatMessages().clear(); // 채팅 메시지 비우기
+        project.getMembers().clear();      // 멤버 리스트 비우기
+
+        // 2. 변경 사항을 DB에 먼저 반영하여 자식 레코드 삭제
+        projectRepository.flush();
+
+        // 3. 부모 엔티티 삭제
         projectRepository.delete(project);
+
+        log.info("프로젝트 삭제 완료 - ID: {}", projectId);
     }
 
-    /**
-     * 상세 조회
-     */
+    // 상세조회
     @Transactional(readOnly = true)
     public ProjectDto.DetailResponse getProjectDetail(Long projectId, User user) {
         Project project = projectRepository.findById(projectId)
@@ -171,10 +173,8 @@ public class ProjectService {
                 .build();
     }
 
-    /**
-     * 프로젝트 정보 및 요약 업데이트
-     */
-    @Transactional
+
+    // 프로젝트 정보 및 요약 업데이트
     public void updateSessionSummary(Long projectId, ProjectDto.SummaryUpdateRequest request, User user) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
@@ -182,7 +182,6 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("업데이트 권한이 없습니다."));
 
-        // 1. 프로젝트 기본 정보 업데이트 (이름, 주제)
         if (request.getName() != null && !request.getName().isEmpty()) {
             project.updateName(request.getName());
         }
@@ -190,13 +189,11 @@ public class ProjectService {
             project.updateSubject(request.getSubject());
         }
 
-        // 2. 정형 요약 데이터 업데이트 또는 생성
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
                 .orElseGet(() -> ProjectSessionSummary.builder()
                         .project(project)
                         .build());
 
-        // 사용자가 수정한 데이터 반영
         String titleToUpdate = (request.getTitle() != null) ? request.getTitle() : project.getName();
 
         summary.updateAll(
@@ -210,11 +207,9 @@ public class ProjectService {
                 "MANUAL"
         );
 
-        // 3. 데이터 저장 강제
         summaryRepository.save(summary);
         projectRepository.save(project);
 
-        // 4. 상태 업데이트
         if (request.getGoal() != null && request.getGoal().length() > 5) {
             project.updateStatus("PLANNING_DONE");
         }
