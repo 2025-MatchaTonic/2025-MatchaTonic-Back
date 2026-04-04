@@ -79,10 +79,17 @@ public class ChatService {
                     .collect(Collectors.toList());
 
             String currentStatus = project.getAiCurrentStatus();
+
+            // 1. 기존 JSON 데이터 가져오기
             Map<String, Object> collectedData = project.getAiCollectedDataMap();
 
+            // 2.  수동 수정된 최신 세션 요약 데이터가 있다면 JSON 데이터에 Merge
+            summaryRepository.findByProject(project).ifPresent(summary -> {
+                collectedData.putAll(summary.toDataMap());
+            });
+
             if (!collectedData.containsKey("title")) {
-                collectedData.put("title", "");
+                collectedData.put("title", project.getName());
             }
 
             AiChatRequestDto request = AiChatRequestDto.builder()
@@ -100,10 +107,8 @@ public class ChatService {
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
             if (response != null) {
-                String newStatus = response.currentStatus();
-                String newCollectedDataJson = objectMapper.writeValueAsString(response.collectedData());
-                project.updateAiContext(newStatus, newCollectedDataJson);
-                projectRepository.save(project);
+                // 3. [수정 포인트] 응답받은 최신 데이터를 Project JSON 컬럼과 요약 테이블 양쪽 모두에 반영
+                updateProjectAndSummary(project, response);
 
                 if (response.content() != null) {
                     ChatMessageDto aiDto = ChatMessageDto.builder()
@@ -116,14 +121,41 @@ public class ChatService {
                             .build();
 
                     saveToDb(aiDto, project);
-                    if (shouldUpdateSummary(response.content())) {
-                        updateProjectSummary(project, response.content());
-                    }
                     messagingTemplate.convertAndSend("/sub/project/" + project.getId(), aiDto);
                 }
             }
         } catch (Exception e) {
             log.error("AI 응답 처리 오류: {}", e.getMessage());
+        }
+    }
+
+
+    @Transactional
+    protected void updateProjectAndSummary(Project project, AiChatResponseDto response) {
+        try {
+            // 1. Project 엔티티의 AI 컨텍스트(JSON) 업데이트
+            String newStatus = response.currentStatus();
+            String newCollectedDataJson = objectMapper.writeValueAsString(response.collectedData());
+            project.updateAiContext(newStatus, newCollectedDataJson);
+            projectRepository.save(project);
+
+            // 2. ProjectSessionSummary 테이블 필드 단위 동기화
+            Map<String, Object> data = response.collectedData();
+            ProjectSessionSummary summary = summaryRepository.findByProject(project)
+                    .orElseGet(() -> ProjectSessionSummary.builder().project(project).build());
+
+            summary.updateAll(
+                    (String) data.getOrDefault("title", summary.getTitle()),
+                    (String) data.getOrDefault("goal", summary.getGoal()),
+                    (String) data.getOrDefault("teamSize", summary.getTeamSize()),
+                    (String) data.getOrDefault("roles", summary.getRoles()),
+                    (String) data.getOrDefault("dueDate", summary.getDueDate()),
+                    (String) data.getOrDefault("deliverables", summary.getDeliverables()),
+                    null, "AI"
+            );
+            summaryRepository.save(summary);
+        } catch (Exception e) {
+            log.error("데이터 동기화 실패: {}", e.getMessage());
         }
     }
 
@@ -134,7 +166,6 @@ public class ChatService {
 
         long messageCount = chatMessageRepository.countByProjectId(projectId);
 
-        // 메시지가 하나도 없고, 주제가 아직 비어있다면 AI가 먼저 말을 겁니다.
         if (messageCount == 0 && (project.getSubject() == null || project.getSubject().isEmpty() || project.getSubject().contains("주제를 입력해주세요"))) {
             ChatMessageDto aiMsg = ChatMessageDto.builder()
                     .type(ChatMessageDto.MessageType.SYSTEM)
@@ -147,28 +178,6 @@ public class ChatService {
 
             saveToDb(aiMsg, project);
             messagingTemplate.convertAndSend("/sub/project/" + projectId, aiMsg);
-        }
-    }
-
-    private boolean shouldUpdateSummary(String content) {
-        if (content == null) return false;
-        return content.contains("요약") || content.contains("결정") || content.contains("확정") || content.length() > 100;
-    }
-
-    @Transactional
-    protected void updateProjectSummary(Project project, String aiContent) {
-        try {
-            ProjectSessionSummary summary = summaryRepository.findByProject(project)
-                    .orElseGet(() -> ProjectSessionSummary.builder()
-                            .project(project)
-                            .updatedSource("AI")
-                            .build());
-
-            summary.updateAll(project.getName(), aiContent, "논의 중", "분석 중", "미정", "기획안", null, "AI");
-            summaryRepository.save(summary);
-            projectRepository.save(project);
-        } catch (Exception e) {
-            log.error("요약 저장 실패: {}", e.getMessage());
         }
     }
 

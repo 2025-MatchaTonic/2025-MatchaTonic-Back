@@ -47,7 +47,7 @@ public class Project {
     @Column(name = "ai_collected_data", columnDefinition = "TEXT")
     private String aiCollectedData = "{}";
 
-    @OneToOne(mappedBy = "project", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @OneToOne(mappedBy = "project", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
     private ProjectSessionSummary projectSessionSummary;
 
     @ManyToOne(fetch = FetchType.LAZY)

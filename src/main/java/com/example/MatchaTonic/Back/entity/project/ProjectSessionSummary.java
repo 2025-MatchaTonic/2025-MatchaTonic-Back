@@ -8,6 +8,8 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 @Getter
 @NoArgsConstructor
@@ -60,6 +62,18 @@ public class ProjectSessionSummary {
         this.deliverables = deliverables;
         this.updatedBy = updatedBy;
         this.updatedSource = updatedSource;
+    }
+
+    // 데이터를 Map으로 변환하여 AI 요청 시 Merge하기 편하게 해주는 메서드
+    public Map<String, Object> toDataMap() {
+        Map<String, Object> data = new HashMap<>();
+        if (title != null) data.put("title", title);
+        if (goal != null) data.put("goal", goal);
+        if (teamSize != null) data.put("teamSize", teamSize);
+        if (roles != null) data.put("roles", roles);
+        if (dueDate != null) data.put("dueDate", dueDate);
+        if (deliverables != null) data.put("deliverables", deliverables);
+        return data;
     }
 
     // 업데이트를 위한 편의 메서드
