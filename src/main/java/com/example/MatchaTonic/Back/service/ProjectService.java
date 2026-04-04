@@ -125,20 +125,25 @@ public class ProjectService {
         // 1. 요약 정보 삭제
         summaryRepository.findByProject(project).ifPresent(summaryRepository::delete);
 
-        // 2. 채팅 메시지 삭제 (Repository의 Modifying 쿼리 호출)
+        // 2. 채팅 메시지 '벌크' 삭제 (DB에서 직접 제거)
         projectRepository.deleteChatMessagesByProjectId(projectId);
 
         // 3. 멤버 삭제
         projectMemberRepository.deleteByProject(project);
 
-        // 4. 영속성 컨텍스트 반영 및 초기화
+        // 4.영속성 컨텍스트에 남은 프로젝트 객체를 강제로 비우거나, 자식과의 연결 고리를 메모리에서 끊기
+        project.getChatMessages().clear();
+        project.getMembers().clear();
+
+        // 5. DB 반영
         projectRepository.flush();
 
-        // 5. 부모 엔티티 삭제
+        // 6. 부모 삭제
         projectRepository.delete(project);
 
-        log.info("프로젝트 최종 삭제 완료 - ID: {}", projectId);
+        log.info("프로젝트 최종 삭제 성공 - ID: {}", projectId);
     }
+
     // 상세조회
     @Transactional(readOnly = true)
     public ProjectDto.DetailResponse getProjectDetail(Long projectId, User user) {
