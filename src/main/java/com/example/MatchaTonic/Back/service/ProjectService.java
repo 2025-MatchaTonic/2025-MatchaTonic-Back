@@ -10,12 +10,14 @@ import com.example.MatchaTonic.Back.entity.project.ProjectSessionSummary;
 import com.example.MatchaTonic.Back.repository.project.ProjectMemberRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectSessionSummaryRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -29,7 +31,7 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final ProjectSessionSummaryRepository summaryRepository;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     // 프로젝트 생성
     public ProjectDto.CreateResponse createProject(ProjectDto.CreateRequest request, User leader) {
@@ -173,7 +175,7 @@ public class ProjectService {
                 .build();
     }
 
-    // 프로젝트 정보 및 세션 요약 수동 업데이트 (AI 분석 결과와 동기화 포함)
+   // PATCH처럼 동작 ,  null / "" / 공백은 기존 값 유지 , 수동 확정값은 ProjectSessionSummary가 우선 , 비어있지 않은 값만 ai_collected_data에도 동기화
     @Transactional
     public void updateSessionSummary(Long projectId, ProjectDto.SummaryUpdateRequest request, User user) {
         Project project = projectRepository.findById(projectId)
@@ -182,62 +184,137 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("업데이트 권한이 없습니다."));
 
-        // 1. 프로젝트 기본 정보 업데이트
-        if (request.getName() != null && !request.getName().isEmpty()) {
-            project.updateName(request.getName());
+        // 1. 프로젝트 기본 정보 PATCH
+        if (hasText(request.getName())) {
+            project.updateName(request.getName().trim());
         }
-        if (request.getSubject() != null) {
-            project.updateSubject(request.getSubject());
+        if (hasText(request.getSubject())) {
+            project.updateSubject(request.getSubject().trim());
         }
 
-        // 2. 세션 요약 테이블 업데이트
+        // 2. Summary 확보
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
                 .orElseGet(() -> ProjectSessionSummary.builder()
                         .project(project)
                         .build());
 
-        String titleToUpdate = (request.getTitle() != null) ? request.getTitle() : project.getName();
+        // 3. 기존 값 유지 + 들어온 값만 덮어쓰기
+        String nextTitle = hasText(request.getTitle())
+                ? request.getTitle().trim()
+                : firstNonBlank(summary.getTitle(), project.getName());
+
+        String nextGoal = hasText(request.getGoal())
+                ? request.getGoal().trim()
+                : summary.getGoal();
+
+        String nextTeamSize = hasText(request.getTeamSize())
+                ? request.getTeamSize().trim()
+                : summary.getTeamSize();
+
+        String nextRoles = hasText(request.getRoles())
+                ? request.getRoles().trim()
+                : summary.getRoles();
+
+        String nextDueDate = hasText(request.getDueDate())
+                ? request.getDueDate().trim()
+                : summary.getDueDate();
+
+        String nextDeliverables = hasText(request.getDeliverables())
+                ? request.getDeliverables().trim()
+                : summary.getDeliverables();
 
         summary.updateAll(
-                titleToUpdate,
-                request.getGoal(),
-                request.getTeamSize(),
-                request.getRoles(),
-                request.getDueDate(),
-                request.getDeliverables(),
+                nextTitle,
+                nextGoal,
+                nextTeamSize,
+                nextRoles,
+                nextDueDate,
+                nextDeliverables,
                 user,
                 "MANUAL"
         );
 
-        // 3. 수동 수정본을 AI CollectedData에도 반영하여 동기화
-        Map<String, Object> aiData = project.getAiCollectedDataMap();
-        if (request.getGoal() != null) aiData.put("goal", request.getGoal());
-        if (request.getTitle() != null) aiData.put("title", request.getTitle());
+        // 4. ai_collected_data 동기화
+        Map<String, Object> aiData = safeAiCollectedData(project);
+
+        overlayNonBlank(aiData, "subject", request.getSubject());
+        overlayNonBlank(aiData, "title", request.getTitle());
+        overlayNonBlank(aiData, "goal", request.getGoal());
+        overlayNonBlank(aiData, "teamSize", request.getTeamSize());
+        overlayNonBlank(aiData, "roles", request.getRoles());
+        overlayNonBlank(aiData, "dueDate", request.getDueDate());
+        overlayNonBlank(aiData, "deliverables", request.getDeliverables());
+
+        // title 최소 보정
+        if (!hasText(asString(aiData.get("title")))) {
+            aiData.put("title", nextTitle);
+        }
 
         try {
             String updatedAiDataJson = objectMapper.writeValueAsString(aiData);
-            project.updateAiContext(project.getAiCurrentStatus(), updatedAiDataJson);
+            String currentStatus = hasText(project.getAiCurrentStatus()) ? project.getAiCurrentStatus() : "EXPLORE";
+            project.updateAiContext(currentStatus, updatedAiDataJson);
         } catch (Exception e) {
-            log.error("AI 데이터 동기화 실패: {}", e.getMessage());
+            log.error("AI 데이터 동기화 실패 - projectId={}: {}", projectId, e.getMessage(), e);
         }
 
         summaryRepository.save(summary);
         projectRepository.save(project);
 
-        if (request.getGoal() != null && request.getGoal().length() > 5) {
+        if (hasText(nextGoal) || hasText(project.getSubject())) {
             project.updateStatus("PLANNING_DONE");
         }
 
-        log.info("수동 업데이트 완료 및 AI 컨텍스트 동기화 - 프로젝트ID: {}", projectId);
+        log.info("수동 요약 PATCH 완료 - projectId={}, summary={}, aiData={}", projectId, summary.toDataMap(), aiData);
     }
 
-    // AI 분석 결과 DB 업데이트 로직
+    /**
+     * 채팅/export 공통으로 사용할 collectedData 빌더
+     * 규칙:
+     * 1) ai_collected_data를 기본값으로 사용
+     * 2) summary 확정값을 overlay
+     * 3) null/빈문자열/공백은 덮어쓰기 금지
+     * 4) title은 의미 있는 값이 없을 때만 최소 보정
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> buildCollectedData(Project project) {
+        Map<String, Object> merged = new HashMap<>(safeAiCollectedData(project));
+        log.info("buildCollectedData - aiData(projectId={}): {}", project.getId(), merged);
+
+        summaryRepository.findByProject(project).ifPresentOrElse(
+                summary -> {
+                    Map<String, Object> summaryMap = summary.toDataMap();
+                    log.info("buildCollectedData - summaryMap(projectId={}): {}", project.getId(), summaryMap);
+
+                    if (summaryMap != null) {
+                        overlayNonBlank(merged, "subject", summaryMap.get("subject"));
+                        overlayNonBlank(merged, "title", summaryMap.get("title"));
+                        overlayNonBlank(merged, "goal", summaryMap.get("goal"));
+                        overlayNonBlank(merged, "teamSize", summaryMap.get("teamSize"));
+                        overlayNonBlank(merged, "roles", summaryMap.get("roles"));
+                        overlayNonBlank(merged, "dueDate", summaryMap.get("dueDate"));
+                        overlayNonBlank(merged, "deliverables", summaryMap.get("deliverables"));
+                    }
+                },
+                () -> log.info("buildCollectedData - summaryMap(projectId={})=EMPTY", project.getId())
+        );
+
+        sanitizeTitle(project, merged);
+
+        log.info("buildCollectedData - finalMerged(projectId={}): {}", project.getId(), merged);
+        return merged;
+    }
+
+    //AI 응답으로 summary를 업데이트할 때는 보수적으로 처리 -> 수동 확정값이 이미 있으면 덮어쓰지 않음 , 비어 있는 필드만 제한적으로 채움
     @Transactional
     public void updateSummaryFromAi(Long projectId, AiResponseDto aiResponse) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
-        if (aiResponse.templates() == null || aiResponse.templates().isEmpty()) return;
+        if (aiResponse == null || aiResponse.templates() == null || aiResponse.templates().isEmpty()) {
+            return;
+        }
+
         AiResponseDto.TemplateDto template = aiResponse.templates().get(0);
 
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
@@ -245,18 +322,96 @@ public class ProjectService {
                         .project(project)
                         .build());
 
+        String nextTitle = hasText(summary.getTitle())
+                ? summary.getTitle()
+                : firstNonBlank(template.title(), project.getName());
+
+        String nextGoal = hasText(summary.getGoal())
+                ? summary.getGoal()
+                : (template.content() != null ? String.valueOf(template.content()) : null);
+
+        String nextTeamSize = hasText(summary.getTeamSize())
+                ? summary.getTeamSize()
+                : "미지정";
+
+        String nextRoles = hasText(summary.getRoles())
+                ? summary.getRoles()
+                : "AI 분석 역할";
+
+        String nextDueDate = hasText(summary.getDueDate())
+                ? summary.getDueDate()
+                : "기한 미정";
+
+        String nextDeliverables = hasText(summary.getDeliverables())
+                ? summary.getDeliverables()
+                : "AI 생성 결과물";
+
         summary.updateAll(
-                template.title() != null ? template.title() : project.getName(),
-                template.content() != null ? String.valueOf(template.content()) : "",
-                "미지정",
-                "AI 분석 역할",
-                "기한 미정",
-                "AI 생성 결과물",
+                nextTitle,
+                nextGoal,
+                nextTeamSize,
+                nextRoles,
+                nextDueDate,
+                nextDeliverables,
                 project.getLeader(),
                 "AI"
         );
 
         summaryRepository.save(summary);
-        log.info("AI 자동 요약 업데이트 완료 - 프로젝트ID: {}, Source: AI", projectId);
+        log.info("AI 요약 보수 업데이트 완료 - projectId={}, summary={}", projectId, summary.toDataMap());
+    }
+
+    private Map<String, Object> safeAiCollectedData(Project project) {
+        try {
+            Map<String, Object> map = project.getAiCollectedDataMap();
+            return map != null ? new HashMap<>(map) : new HashMap<>();
+        } catch (Exception e) {
+            log.warn("ai_collected_data 파싱 실패 - projectId={}: {}", project.getId(), e.getMessage());
+            return new HashMap<>();
+        }
+    }
+
+    private void sanitizeTitle(Project project, Map<String, Object> collectedData) {
+        String currentTitle = asString(collectedData.get("title"));
+
+        if (!hasText(currentTitle)) {
+            collectedData.put("title", project.getName());
+            return;
+        }
+
+        collectedData.put("title", currentTitle.trim());
+    }
+
+    private void overlayNonBlank(Map<String, Object> target, String key, Object value) {
+        if (value == null) {
+            return;
+        }
+
+        if (value instanceof String str) {
+            if (hasText(str)) {
+                target.put(key, str.trim());
+            }
+            return;
+        }
+
+        target.put(key, value);
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String asString(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (hasText(first)) {
+            return first.trim();
+        }
+        if (hasText(second)) {
+            return second.trim();
+        }
+        return null;
     }
 }

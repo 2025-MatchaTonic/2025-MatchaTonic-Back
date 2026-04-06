@@ -36,7 +36,8 @@ public class ChatService {
     private final SimpMessageSendingOperations messagingTemplate;
     private final RestTemplate restTemplate;
     private final ProjectSessionSummaryRepository summaryRepository;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ProjectService projectService;
+    private final ObjectMapper objectMapper;
 
     @Value("${external.api.fastapi.chat-url}")
     private String aiChatUrl;
@@ -80,33 +81,16 @@ public class ChatService {
 
             String currentStatus = project.getAiCurrentStatus();
 
-            // 1. 기존 JSON 데이터 가져오기 + [로그 1]
-            Map<String, Object> collectedData = project.getAiCollectedDataMap();
-            log.info("[CHECK 1] DB Pure JSON: {}", collectedData);
-
-            // 2. 수동 수정된 데이터 Merge + [로그 2]
-            summaryRepository.findByProject(project).ifPresentOrElse(
-                    summary -> {
-                        Map<String, Object> manualData = summary.toDataMap();
-                        log.info("[CHECK 2] Summary table data: {}", manualData);
-                        collectedData.putAll(manualData);
-                    },
-                    () -> log.warn("[CHECK 2] No Summary row found for Project: {}", project.getId())
-            );
-
-            if (!collectedData.containsKey("title")) {
-                collectedData.put("title", project.getName());
-            }
-
-            // [로그 3] 병합 완료 후의 최종 맵 상태
-            log.info("[CHECK 3] Final Merged Data to be sent: {}", collectedData);
+            // 공통 빌더 호출
+            Map<String, Object> finalData = projectService.buildCollectedData(project);
+            log.info("[CHECK 3] Final Merged Data to be sent: {}", finalData);
 
             AiChatRequestDto request = AiChatRequestDto.builder()
                     .projectId(project.getId())
                     .content(userDto.getMessage())
                     .actionType("CHAT")
                     .currentStatus(currentStatus)
-                    .collectedData(collectedData)
+                    .collectedData(finalData)
                     .recentMessages(recentMessages)
                     .selectedMessage(userDto.getMessage())
                     .selectedAnswers(recentMessages)
@@ -116,6 +100,7 @@ public class ChatService {
             AiChatResponseDto response = restTemplate.postForObject(aiChatUrl, request, AiChatResponseDto.class);
 
             if (response != null) {
+                //  보수적 업데이트 로직이 포함된 메서드 호출
                 updateProjectAndSummary(project, response);
 
                 if (response.content() != null) {
@@ -137,32 +122,43 @@ public class ChatService {
         }
     }
 
-
+    // updateProjectAndSummary 보수화 - AI 응답은 ai_collected_data에 저장하되, 수동 확정값(Summary)이 이미 존재하면 AI 응답으로 덮어쓰지 않음.
     @Transactional
     protected void updateProjectAndSummary(Project project, AiChatResponseDto response) {
         try {
+            // 1. AI 응답 원본은 항상 Project의 JSON 컬럼에 업데이트
             String newStatus = response.currentStatus();
-            String newCollectedDataJson = objectMapper.writeValueAsString(response.collectedData());
+            Map<String, Object> aiData = response.collectedData();
+            String newCollectedDataJson = objectMapper.writeValueAsString(aiData);
             project.updateAiContext(newStatus, newCollectedDataJson);
             projectRepository.save(project);
 
-            Map<String, Object> data = response.collectedData();
+            // 2. Summary 테이블 동기화 (보수적 접근)
             ProjectSessionSummary summary = summaryRepository.findByProject(project)
                     .orElseGet(() -> ProjectSessionSummary.builder().project(project).build());
 
+            // 헬퍼 메서드(getSafeValue)를 통해 수동값이 없을 때만 AI 값으로 채움
             summary.updateAll(
-                    (String) data.getOrDefault("title", summary.getTitle()),
-                    (String) data.getOrDefault("goal", summary.getGoal()),
-                    (String) data.getOrDefault("teamSize", summary.getTeamSize()),
-                    (String) data.getOrDefault("roles", summary.getRoles()),
-                    (String) data.getOrDefault("dueDate", summary.getDueDate()),
-                    (String) data.getOrDefault("deliverables", summary.getDeliverables()),
-                    null, "AI"
+                    getSafeValue(summary.getTitle(), aiData.get("title")),
+                    getSafeValue(summary.getGoal(), aiData.get("goal")),
+                    getSafeValue(summary.getTeamSize(), aiData.get("teamSize")),
+                    getSafeValue(summary.getRoles(), aiData.get("roles")),
+                    getSafeValue(summary.getDueDate(), aiData.get("dueDate")),
+                    getSafeValue(summary.getDeliverables(), aiData.get("deliverables")),
+                    null, "AI_AUTO_FILL"
             );
             summaryRepository.save(summary);
         } catch (Exception e) {
-            log.error("데이터 동기화 실패: {}", e.getMessage());
+            log.error("데이터 동기화 실패: {}", e.getMessage(), e);
         }
+    }
+
+    // 기존 값(current)이 존재하면 유지하고, 비어있을 때만 새 값(newValue)을 채움
+    private String getSafeValue(String current, Object newValue) {
+        if (current != null && !current.trim().isEmpty()) {
+            return current;
+        }
+        return newValue != null ? newValue.toString() : null;
     }
 
     @Transactional

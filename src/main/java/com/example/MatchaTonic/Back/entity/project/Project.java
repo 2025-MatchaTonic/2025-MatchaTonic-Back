@@ -71,6 +71,8 @@ public class Project {
         this.leader = leader;
         this.inviteCode = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         this.status = "IDEA";
+        this.aiCurrentStatus = "EXPLORE";
+        this.aiCollectedData = "{}";
     }
 
     public void updateName(String name) {
@@ -100,8 +102,11 @@ public class Project {
     // JSON 문자열을 Map으로 변환
     public Map<String, Object> getAiCollectedDataMap() {
         try {
+            if (aiCollectedData == null || aiCollectedData.trim().isEmpty()) {
+                return new HashMap<>();
+            }
             ObjectMapper mapper = new ObjectMapper();
-            return mapper.readValue(this.aiCollectedData, new TypeReference<Map<String, Object>>() {});
+            return mapper.readValue(aiCollectedData, new TypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
             return new HashMap<>();
         }

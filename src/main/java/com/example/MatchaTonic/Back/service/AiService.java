@@ -8,7 +8,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
@@ -36,33 +35,36 @@ public class AiService {
 
         try {
             log.info("FastAPI 분석 요청 - ProjectID: {}", request.projectId());
+            log.info("Export currentStatus={}", aiRequestPayload.get("currentStatus"));
+            log.info("Export collectedData={}", aiRequestPayload.get("collectedData"));
+
             aiResponse = restTemplate.postForObject(fastApiUrl, aiRequestPayload, AiResponseDto.class);
 
             if (aiResponse != null && aiResponse.templates() != null) {
-                projectService.updateSummaryFromAi(request.projectId(), aiResponse);
-                notionService.createProjectPagesOnNotion(aiResponse, request.notionToken(), request.pageUrl());
+                // export 단계에서는 AI 응답으로 수동 summary를 덮어쓰지 않음
+                notionService.createProjectPagesOnNotion(
+                        aiResponse,
+                        request.notionToken(),
+                        request.pageUrl()
+                );
             }
         } catch (Exception e) {
-            log.error("AI 분석 중 오류 발생: {}", e.getMessage());
-            throw new RuntimeException("AI 처리 실패");
+            log.error("AI 분석 중 오류 발생: {}", e.getMessage(), e);
+            throw new RuntimeException("AI 처리 실패", e);
         }
     }
 
     private Map<String, Object> createAiRequestPayload(Project project, ExportRequestDto request) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("projectId", project.getId());
-        payload.put("templateType", request.templateType() != null ? request.templateType() : "plan");
+        payload.put("templateType", hasText(request.templateType()) ? request.templateType() : "plan");
 
-        // DB에 저장된 최신 상태와 데이터 사용
-        payload.put("currentStatus", project.getAiCurrentStatus());
-        payload.put("content", request.content() != null ? request.content() : "템플릿 생성 요청");
+        // DB에 저장된 최신 상태 사용
+        payload.put("currentStatus", hasText(project.getAiCurrentStatus()) ? project.getAiCurrentStatus() : "EXPLORE");
+        payload.put("content", hasText(request.content()) ? request.content() : "템플릿 생성 요청");
 
-        Map<String, Object> collectedData = project.getAiCollectedDataMap();
-
-        // title이 난수 방 이름이면 비워줌
-        if (!collectedData.containsKey("title") || String.valueOf(collectedData.get("title")).contains(project.getName())) {
-            collectedData.put("title", "");
-        }
+        // 핵심: ai_collected_data + summary 확정값을 공통 규칙으로 merge
+        Map<String, Object> collectedData = projectService.buildCollectedData(project);
 
         payload.put("collectedData", collectedData);
         payload.put("recentMessages", request.selectedAnswers());
@@ -70,8 +72,14 @@ public class AiService {
 
         if (request.selectedAnswers() != null && !request.selectedAnswers().isEmpty()) {
             payload.put("selectedMessage", request.selectedAnswers().get(request.selectedAnswers().size() - 1));
+        } else {
+            payload.put("selectedMessage", hasText(request.content()) ? request.content() : "템플릿 생성 요청");
         }
 
         return payload;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 }
