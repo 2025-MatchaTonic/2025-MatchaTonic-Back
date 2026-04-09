@@ -10,8 +10,8 @@ import com.example.MatchaTonic.Back.entity.project.ProjectSessionSummary;
 import com.example.MatchaTonic.Back.repository.project.ProjectMemberRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
 import com.example.MatchaTonic.Back.repository.project.ProjectSessionSummaryRepository;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,6 +32,7 @@ public class ProjectService {
     private final ProjectMemberRepository projectMemberRepository;
     private final ProjectSessionSummaryRepository summaryRepository;
     private final ObjectMapper objectMapper;
+    private final EntityManager entityManager; // 영속성 컨텍스트 제어를 위해 추가
 
     // 프로젝트 생성
     public ProjectDto.CreateResponse createProject(ProjectDto.CreateRequest request, User leader) {
@@ -116,38 +117,33 @@ public class ProjectService {
                 .build();
     }
 
-    // 프로젝트 삭제
+    // [수정 핵심] 프로젝트 삭제
     @Transactional
     public void deleteProject(Long projectId, User user) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
-        // 권한 확인 (ID 기반 비교)
         if (project.getLeader() == null || !project.getLeader().getId().equals(user.getId())) {
             throw new IllegalStateException("프로젝트 삭제 권한이 없습니다.");
         }
 
         log.info("프로젝트 삭제 프로세스 시작 - ID: {}", projectId);
 
-        // 1. 자식 데이터(Summary) 삭제
-        summaryRepository.findByProject(project).ifPresent(summary -> {
-            summaryRepository.delete(summary);
-            summaryRepository.flush(); // 즉시 반영
-        });
-
-        // 2. 채팅 메시지 삭제 (Bulk Delete)
+        // 1. 자식 데이터 벌크 삭제 (DB에서 직접 삭제)
+        summaryRepository.findByProject(project).ifPresent(summaryRepository::delete);
         projectRepository.deleteChatMessagesByProjectId(projectId);
-
-        // 3. 프로젝트 멤버 삭제 (Bulk Delete)
         projectMemberRepository.deleteMembersByProjectId(projectId);
 
-        // 4. 모든 자식 삭제 쿼리를 DB에 먼저 보냄
-        projectRepository.flush();
+        // 2. [가장 중요] 벌크 삭제 후 1차 캐시를 비워버림
+        // 이걸 안 하면 project 객체가 삭제된 자식들을 계속 잡고 있어서 Transient 에러가 남
+        entityManager.flush();
+        entityManager.clear();
 
-        // 5. 부모(Project) 삭제
-        projectRepository.delete(project);
+        // 3. 깨끗해진 영속성 컨텍스트에서 프로젝트를 다시 조회해서 삭제
+        Project freshProject = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("삭제할 프로젝트를 찾을 수 없습니다."));
 
-        // 6. 최종 반영
+        projectRepository.delete(freshProject);
         projectRepository.flush();
 
         log.info("프로젝트 삭제 프로세스 완료 - ID: {}", projectId);
