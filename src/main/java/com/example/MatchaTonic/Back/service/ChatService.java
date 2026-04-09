@@ -185,7 +185,9 @@ public class ChatService {
 
     private void saveToDb(ChatMessageDto dto, Project project) {
         User sender = null;
-        if (dto.getSenderEmail() != null && !dto.getSenderEmail().isBlank()) {
+
+        // [수정 핵심] AI 계정(ai@promate.ai)이 아닐 때만 유저 조회를 수행하여 500 에러 방지
+        if (dto.getSenderEmail() != null && !dto.getSenderEmail().isBlank() && !"ai@promate.ai".equals(dto.getSenderEmail())) {
             sender = userRepository.findByEmail(dto.getSenderEmail()).orElse(null);
         }
 
@@ -200,7 +202,7 @@ public class ChatService {
 
         ChatMessage chatMessage = ChatMessage.builder()
                 .project(project)
-                .sender(sender)
+                .sender(sender) // AI일 경우 sender는 null로 저장됨
                 .message(dto.getMessage())
                 .type(entityType)
                 .build();
