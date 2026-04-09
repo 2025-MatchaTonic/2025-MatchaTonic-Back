@@ -45,21 +45,14 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
 
                 .authorizeHttpRequests(auth -> auth
-                        // 1. 공통 및 정적 리소스 허용
                         .requestMatchers("/", "/login/**", "/oauth2/**", "/health", "/images/**", "/static/**", "/favicon.ico").permitAll()
                         .requestMatchers("/api/users/**").permitAll()
                         .requestMatchers("/api/manuals/**").permitAll()
-
-                        // 2. 채팅 및 프로젝트/멤버 API 허용
                         .requestMatchers("/api/chat/**").permitAll()
-                        .requestMatchers("/api/projects/**").permitAll()
+                        .requestMatchers("/api/projects/**").authenticated()
                         .requestMatchers("/api/project/**").permitAll()
-
-                        // 3. 웹소켓 및 스웨거 허용
                         .requestMatchers("/ws-stomp/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-
-                        // 나머지는 인증 필요
                         .anyRequest().authenticated()
                 )
 

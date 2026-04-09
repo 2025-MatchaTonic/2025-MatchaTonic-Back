@@ -108,9 +108,6 @@ public class ProjectController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 프로젝트 정보 및 세션 요약 수동 업데이트
-     */
     @Operation(summary = "프로젝트 정보 및 세션 요약 수동 업데이트 ")
     @PatchMapping("/{projectId}/summary")
     public ResponseEntity<String> updateSessionSummary(
@@ -124,8 +121,10 @@ public class ProjectController {
     }
 
     private User getUserFromEmail(String email) {
-        if (email == null) throw new RuntimeException("인증 정보가 없습니다.");
+        if (email == null || email.isBlank() || "anonymousUser".equals(email)) {
+            throw new IllegalStateException("인증 정보가 없습니다.");
+        }
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("유저를 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("유저를 찾을 수 없습니다."));
     }
 }

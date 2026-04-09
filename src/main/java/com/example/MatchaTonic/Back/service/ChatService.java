@@ -122,7 +122,7 @@ public class ChatService {
         }
     }
 
-    // updateProjectAndSummary 보수화 - AI 응답은 ai_collected_data에 저장하되, 수동 확정값(Summary)이 이미 존재하면 AI 응답으로 덮어쓰지 않음.
+
     @Transactional
     protected void updateProjectAndSummary(Project project, AiChatResponseDto response) {
         try {
@@ -186,7 +186,7 @@ public class ChatService {
     private void saveToDb(ChatMessageDto dto, Project project) {
         User sender = null;
 
-        // [수정 핵심] AI 계정(ai@promate.ai)이 아닐 때만 유저 조회를 수행하여 500 에러 방지
+
         if (dto.getSenderEmail() != null && !dto.getSenderEmail().isBlank() && !"ai@promate.ai".equals(dto.getSenderEmail())) {
             sender = userRepository.findByEmail(dto.getSenderEmail()).orElse(null);
         }
