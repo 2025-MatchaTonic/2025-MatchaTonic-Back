@@ -4,6 +4,7 @@ import com.example.MatchaTonic.Back.security.oauth.CustomOAuth2UserService;
 import com.example.MatchaTonic.Back.security.jwt.JwtAuthenticationFilter;
 import com.example.MatchaTonic.Back.security.jwt.JwtTokenProvider;
 import com.example.MatchaTonic.Back.security.oauth.OAuth2SuccessHandler;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -42,18 +43,35 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
 
+                // JWT를 사용하므로 세션은 가급적 STATELESS가 좋으나, 기존 설정(IF_REQUIRED) 유지
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
 
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/", "/login/**", "/oauth2/**", "/health", "/images/**", "/static/**", "/favicon.ico").permitAll()
                         .requestMatchers("/api/users/**").permitAll()
                         .requestMatchers("/api/manuals/**").permitAll()
-                        .requestMatchers("/api/chat/**").permitAll()
-                        .requestMatchers("/api/projects/**").authenticated()
-                        .requestMatchers("/api/project/**").permitAll()
+                        // 프로젝트 및 채팅 관련 API는 인증 필수 (CORS 리다이렉트 방지 대상)
+                        .requestMatchers("/api/projects/**", "/api/project/**").authenticated()
+                        .requestMatchers("/api/chat/**").authenticated()
                         .requestMatchers("/ws-stomp/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated()
+                )
+
+                // [핵심 추가] 인증 실패 시 리다이렉트하지 않고 401/403 에러 반환
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            // 인증되지 않은 사용자가 접근 시 401 반환
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"status\":401, \"code\":\"UNAUTHORIZED\", \"message\":\"로그인이 필요합니다.\"}");
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            // 권한이 없는 사용자가 접근 시 403 반환
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"status\":403, \"code\":\"FORBIDDEN\", \"message\":\"권한이 없습니다.\"}");
+                        })
                 )
 
                 .oauth2Login(oauth2 -> oauth2
