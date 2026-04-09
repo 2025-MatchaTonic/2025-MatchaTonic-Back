@@ -40,14 +40,13 @@ public class Project {
     @Column(nullable = false)
     private String status;
 
-    // AI 상태 유지 필드 추가
     @Column(name = "ai_current_status")
     private String aiCurrentStatus = "EXPLORE";
 
     @Column(name = "ai_collected_data", columnDefinition = "TEXT")
     private String aiCollectedData = "{}";
 
-    @OneToOne(mappedBy = "project", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @OneToOne(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private ProjectSessionSummary projectSessionSummary;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -89,7 +88,6 @@ public class Project {
         this.status = status;
     }
 
-    // AI 컨텍스트 업데이트 메서드
     public void updateAiContext(String status, String collectedDataJson) {
         if (status != null && !status.isEmpty()) {
             this.aiCurrentStatus = status;
@@ -99,7 +97,6 @@ public class Project {
         }
     }
 
-    // JSON 문자열을 Map으로 변환
     public Map<String, Object> getAiCollectedDataMap() {
         try {
             if (aiCollectedData == null || aiCollectedData.trim().isEmpty()) {
