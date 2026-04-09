@@ -122,21 +122,35 @@ public class ProjectService {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
 
+        // 권한 확인 (ID 기반 비교)
         if (project.getLeader() == null || !project.getLeader().getId().equals(user.getId())) {
             throw new IllegalStateException("프로젝트 삭제 권한이 없습니다.");
         }
 
-        log.info("프로젝트 삭제 시도 - ID: {}", projectId);
+        log.info("프로젝트 삭제 프로세스 시작 - ID: {}", projectId);
 
-        summaryRepository.findByProject(project).ifPresent(summaryRepository::delete);
+        // 1. 자식 데이터(Summary) 삭제
+        summaryRepository.findByProject(project).ifPresent(summary -> {
+            summaryRepository.delete(summary);
+            summaryRepository.flush(); // 즉시 반영
+        });
+
+        // 2. 채팅 메시지 삭제 (Bulk Delete)
         projectRepository.deleteChatMessagesByProjectId(projectId);
+
+        // 3. 프로젝트 멤버 삭제 (Bulk Delete)
         projectMemberRepository.deleteMembersByProjectId(projectId);
 
-        projectRepository.flush();
-        projectRepository.delete(project);
+        // 4. 모든 자식 삭제 쿼리를 DB에 먼저 보냄
         projectRepository.flush();
 
-        log.info("프로젝트 삭제 최종 완료 - ID: {}", projectId);
+        // 5. 부모(Project) 삭제
+        projectRepository.delete(project);
+
+        // 6. 최종 반영
+        projectRepository.flush();
+
+        log.info("프로젝트 삭제 프로세스 완료 - ID: {}", projectId);
     }
 
     // 상세조회
@@ -175,7 +189,6 @@ public class ProjectService {
                 .build();
     }
 
-   // PATCH처럼 동작 ,  null / "" / 공백은 기존 값 유지 , 수동 확정값은 ProjectSessionSummary가 우선 , 비어있지 않은 값만 ai_collected_data에도 동기화
     @Transactional
     public void updateSessionSummary(Long projectId, ProjectDto.SummaryUpdateRequest request, User user) {
         Project project = projectRepository.findById(projectId)
@@ -184,7 +197,6 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("업데이트 권한이 없습니다."));
 
-        // 1. 프로젝트 기본 정보 PATCH
         if (hasText(request.getName())) {
             project.updateName(request.getName().trim());
         }
@@ -192,13 +204,11 @@ public class ProjectService {
             project.updateSubject(request.getSubject().trim());
         }
 
-        // 2. Summary 확보
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
                 .orElseGet(() -> ProjectSessionSummary.builder()
                         .project(project)
                         .build());
 
-        // 3. 기존 값 유지 + 들어온 값만 덮어쓰기
         String nextTitle = hasText(request.getTitle())
                 ? request.getTitle().trim()
                 : firstNonBlank(summary.getTitle(), project.getName());
@@ -234,7 +244,6 @@ public class ProjectService {
                 "MANUAL"
         );
 
-        // 4. ai_collected_data 동기화
         Map<String, Object> aiData = safeAiCollectedData(project);
 
         overlayNonBlank(aiData, "subject", request.getSubject());
@@ -245,7 +254,6 @@ public class ProjectService {
         overlayNonBlank(aiData, "dueDate", request.getDueDate());
         overlayNonBlank(aiData, "deliverables", request.getDeliverables());
 
-        // title 최소 보정
         if (!hasText(asString(aiData.get("title")))) {
             aiData.put("title", nextTitle);
         }
@@ -264,48 +272,29 @@ public class ProjectService {
         if (hasText(nextGoal) || hasText(project.getSubject())) {
             project.updateStatus("PLANNING_DONE");
         }
-
-        log.info("수동 요약 PATCH 완료 - projectId={}, summary={}, aiData={}", projectId, summary.toDataMap(), aiData);
     }
 
-    /**
-     * 채팅/export 공통으로 사용할 collectedData 빌더
-     * 규칙:
-     * 1) ai_collected_data를 기본값으로 사용
-     * 2) summary 확정값을 overlay
-     * 3) null/빈문자열/공백은 덮어쓰기 금지
-     * 4) title은 의미 있는 값이 없을 때만 최소 보정
-     */
     @Transactional(readOnly = true)
     public Map<String, Object> buildCollectedData(Project project) {
         Map<String, Object> merged = new HashMap<>(safeAiCollectedData(project));
-        log.info("buildCollectedData - aiData(projectId={}): {}", project.getId(), merged);
 
-        summaryRepository.findByProject(project).ifPresentOrElse(
-                summary -> {
-                    Map<String, Object> summaryMap = summary.toDataMap();
-                    log.info("buildCollectedData - summaryMap(projectId={}): {}", project.getId(), summaryMap);
-
-                    if (summaryMap != null) {
-                        overlayNonBlank(merged, "subject", summaryMap.get("subject"));
-                        overlayNonBlank(merged, "title", summaryMap.get("title"));
-                        overlayNonBlank(merged, "goal", summaryMap.get("goal"));
-                        overlayNonBlank(merged, "teamSize", summaryMap.get("teamSize"));
-                        overlayNonBlank(merged, "roles", summaryMap.get("roles"));
-                        overlayNonBlank(merged, "dueDate", summaryMap.get("dueDate"));
-                        overlayNonBlank(merged, "deliverables", summaryMap.get("deliverables"));
-                    }
-                },
-                () -> log.info("buildCollectedData - summaryMap(projectId={})=EMPTY", project.getId())
-        );
+        summaryRepository.findByProject(project).ifPresent(summary -> {
+            Map<String, Object> summaryMap = summary.toDataMap();
+            if (summaryMap != null) {
+                overlayNonBlank(merged, "subject", summaryMap.get("subject"));
+                overlayNonBlank(merged, "title", summaryMap.get("title"));
+                overlayNonBlank(merged, "goal", summaryMap.get("goal"));
+                overlayNonBlank(merged, "teamSize", summaryMap.get("teamSize"));
+                overlayNonBlank(merged, "roles", summaryMap.get("roles"));
+                overlayNonBlank(merged, "dueDate", summaryMap.get("dueDate"));
+                overlayNonBlank(merged, "deliverables", summaryMap.get("deliverables"));
+            }
+        });
 
         sanitizeTitle(project, merged);
-
-        log.info("buildCollectedData - finalMerged(projectId={}): {}", project.getId(), merged);
         return merged;
     }
 
-    //AI 응답으로 summary를 업데이트할 때는 보수적으로 처리 -> 수동 확정값이 이미 있으면 덮어쓰지 않음 , 비어 있는 필드만 제한적으로 채움
     @Transactional
     public void updateSummaryFromAi(Long projectId, AiResponseDto aiResponse) {
         Project project = projectRepository.findById(projectId)
@@ -330,21 +319,10 @@ public class ProjectService {
                 ? summary.getGoal()
                 : (template.content() != null ? String.valueOf(template.content()) : null);
 
-        String nextTeamSize = hasText(summary.getTeamSize())
-                ? summary.getTeamSize()
-                : "미지정";
-
-        String nextRoles = hasText(summary.getRoles())
-                ? summary.getRoles()
-                : "AI 분석 역할";
-
-        String nextDueDate = hasText(summary.getDueDate())
-                ? summary.getDueDate()
-                : "기한 미정";
-
-        String nextDeliverables = hasText(summary.getDeliverables())
-                ? summary.getDeliverables()
-                : "AI 생성 결과물";
+        String nextTeamSize = hasText(summary.getTeamSize()) ? summary.getTeamSize() : "미지정";
+        String nextRoles = hasText(summary.getRoles()) ? summary.getRoles() : "AI 분석 역할";
+        String nextDueDate = hasText(summary.getDueDate()) ? summary.getDueDate() : "기한 미정";
+        String nextDeliverables = hasText(summary.getDeliverables()) ? summary.getDeliverables() : "AI 생성 결과물";
 
         summary.updateAll(
                 nextTitle,
@@ -358,7 +336,6 @@ public class ProjectService {
         );
 
         summaryRepository.save(summary);
-        log.info("AI 요약 보수 업데이트 완료 - projectId={}, summary={}", projectId, summary.toDataMap());
     }
 
     private Map<String, Object> safeAiCollectedData(Project project) {
@@ -366,34 +343,25 @@ public class ProjectService {
             Map<String, Object> map = project.getAiCollectedDataMap();
             return map != null ? new HashMap<>(map) : new HashMap<>();
         } catch (Exception e) {
-            log.warn("ai_collected_data 파싱 실패 - projectId={}: {}", project.getId(), e.getMessage());
             return new HashMap<>();
         }
     }
 
     private void sanitizeTitle(Project project, Map<String, Object> collectedData) {
         String currentTitle = asString(collectedData.get("title"));
-
         if (!hasText(currentTitle)) {
             collectedData.put("title", project.getName());
             return;
         }
-
         collectedData.put("title", currentTitle.trim());
     }
 
     private void overlayNonBlank(Map<String, Object> target, String key, Object value) {
-        if (value == null) {
-            return;
-        }
-
+        if (value == null) return;
         if (value instanceof String str) {
-            if (hasText(str)) {
-                target.put(key, str.trim());
-            }
+            if (hasText(str)) target.put(key, str.trim());
             return;
         }
-
         target.put(key, value);
     }
 
@@ -406,12 +374,8 @@ public class ProjectService {
     }
 
     private String firstNonBlank(String first, String second) {
-        if (hasText(first)) {
-            return first.trim();
-        }
-        if (hasText(second)) {
-            return second.trim();
-        }
+        if (hasText(first)) return first.trim();
+        if (hasText(second)) return second.trim();
         return null;
     }
 }
