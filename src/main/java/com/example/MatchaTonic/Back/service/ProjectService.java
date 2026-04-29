@@ -129,16 +129,13 @@ public class ProjectService {
 
         log.info("프로젝트 삭제 프로세스 시작 - ID: {}", projectId);
 
-        // 1. 자식 데이터 벌크 삭제 (DB에서 직접 삭제)
         summaryRepository.findByProject(project).ifPresent(summaryRepository::delete);
         projectRepository.deleteChatMessagesByProjectId(projectId);
         projectMemberRepository.deleteMembersByProjectId(projectId);
 
-        // 2. 벌크 삭제 후 1차 캐시를 비우기 -> 이걸 안 하면 project 객체가 삭제된 자식들을 계속 잡고 있어서 Transient 에러가 남
         entityManager.flush();
         entityManager.clear();
 
-        // 3. 깨끗해진 영속성 컨텍스트에서 프로젝트를 다시 조회해서 삭제
         Project freshProject = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("삭제할 프로젝트를 찾을 수 없습니다."));
 
@@ -148,7 +145,7 @@ public class ProjectService {
         log.info("프로젝트 삭제 프로세스 완료 - ID: {}", projectId);
     }
 
-    // [추가됨] 세션 요약 정보 단독 조회
+    // [추가] 세션 요약 정보만 단독 조회 (GET /summary 대응)
     @Transactional(readOnly = true)
     public ProjectDto.SessionSummaryDto getProjectSummaryOnly(Long projectId, User user) {
         Project project = projectRepository.findById(projectId)
@@ -159,9 +156,7 @@ public class ProjectService {
 
         ProjectSessionSummary summary = summaryRepository.findByProject(project).orElse(null);
 
-        if (summary == null) {
-            return null;
-        }
+        if (summary == null) return null;
 
         return ProjectDto.SessionSummaryDto.builder()
                 .title(summary.getTitle())
@@ -221,79 +216,23 @@ public class ProjectService {
         projectMemberRepository.findByUserAndProject(user, project)
                 .orElseThrow(() -> new IllegalStateException("업데이트 권한이 없습니다."));
 
-        if (hasText(request.getName())) {
-            project.updateName(request.getName().trim());
-        }
-        if (hasText(request.getSubject())) {
-            project.updateSubject(request.getSubject().trim());
-        }
+        if (hasText(request.getName())) project.updateName(request.getName().trim());
+        if (hasText(request.getSubject())) project.updateSubject(request.getSubject().trim());
 
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
-                .orElseGet(() -> ProjectSessionSummary.builder()
-                        .project(project)
-                        .build());
+                .orElseGet(() -> ProjectSessionSummary.builder().project(project).build());
 
-        String nextTitle = hasText(request.getTitle())
-                ? request.getTitle().trim()
-                : firstNonBlank(summary.getTitle(), project.getName());
+        String nextTitle = firstNonBlank(request.getTitle(), summary.getTitle(), project.getName());
+        String nextSubject = firstNonBlank(request.getSubject(), summary.getSubject(), project.getSubject());
+        String nextGoal = firstNonBlank(request.getGoal(), summary.getGoal());
+        String nextTeamSize = firstNonBlank(request.getTeamSize(), summary.getTeamSize());
+        String nextRoles = firstNonBlank(request.getRoles(), summary.getRoles());
+        String nextDueDate = firstNonBlank(request.getDueDate(), summary.getDueDate());
+        String nextDeliverables = firstNonBlank(request.getDeliverables(), summary.getDeliverables());
 
-        String nextSubject = hasText(request.getSubject())
-                ? request.getSubject().trim()
-                : summary.getSubject();
+        summary.updateAll(nextTitle, nextSubject, nextGoal, nextTeamSize, nextRoles, nextDueDate, nextDeliverables, user, "MANUAL");
 
-        String nextGoal = hasText(request.getGoal())
-                ? request.getGoal().trim()
-                : summary.getGoal();
-
-        String nextTeamSize = hasText(request.getTeamSize())
-                ? request.getTeamSize().trim()
-                : summary.getTeamSize();
-
-        String nextRoles = hasText(request.getRoles())
-                ? request.getRoles().trim()
-                : summary.getRoles();
-
-        String nextDueDate = hasText(request.getDueDate())
-                ? request.getDueDate().trim()
-                : summary.getDueDate();
-
-        String nextDeliverables = hasText(request.getDeliverables())
-                ? request.getDeliverables().trim()
-                : summary.getDeliverables();
-
-        summary.updateAll(
-                nextTitle,
-                nextSubject,
-                nextGoal,
-                nextTeamSize,
-                nextRoles,
-                nextDueDate,
-                nextDeliverables,
-                user,
-                "MANUAL"
-        );
-
-        Map<String, Object> aiData = safeAiCollectedData(project);
-
-        overlayNonBlank(aiData, "subject", request.getSubject());
-        overlayNonBlank(aiData, "title", request.getTitle());
-        overlayNonBlank(aiData, "goal", request.getGoal());
-        overlayNonBlank(aiData, "teamSize", request.getTeamSize());
-        overlayNonBlank(aiData, "roles", request.getRoles());
-        overlayNonBlank(aiData, "dueDate", request.getDueDate());
-        overlayNonBlank(aiData, "deliverables", request.getDeliverables());
-
-        if (!hasText(asString(aiData.get("title")))) {
-            aiData.put("title", nextTitle);
-        }
-
-        try {
-            String updatedAiDataJson = objectMapper.writeValueAsString(aiData);
-            String currentStatus = hasText(project.getAiCurrentStatus()) ? project.getAiCurrentStatus() : "EXPLORE";
-            project.updateAiContext(currentStatus, updatedAiDataJson);
-        } catch (Exception e) {
-            log.error("AI 데이터 동기화 실패 - projectId={}: {}", projectId, e.getMessage(), e);
-        }
+        syncSummaryToAiContext(project, summary); // AI 컨텍스트 동기화
 
         summaryRepository.save(summary);
         projectRepository.save(project);
@@ -301,27 +240,6 @@ public class ProjectService {
         if (hasText(nextGoal) || hasText(project.getSubject())) {
             project.updateStatus("PLANNING_DONE");
         }
-    }
-
-    @Transactional(readOnly = true)
-    public Map<String, Object> buildCollectedData(Project project) {
-        Map<String, Object> merged = new HashMap<>(safeAiCollectedData(project));
-
-        summaryRepository.findByProject(project).ifPresent(summary -> {
-            Map<String, Object> summaryMap = summary.toDataMap();
-            if (summaryMap != null) {
-                overlayNonBlank(merged, "subject", summaryMap.get("subject"));
-                overlayNonBlank(merged, "title", summaryMap.get("title"));
-                overlayNonBlank(merged, "goal", summaryMap.get("goal"));
-                overlayNonBlank(merged, "teamSize", summaryMap.get("teamSize"));
-                overlayNonBlank(merged, "roles", summaryMap.get("roles"));
-                overlayNonBlank(merged, "dueDate", summaryMap.get("dueDate"));
-                overlayNonBlank(merged, "deliverables", summaryMap.get("deliverables"));
-            }
-        });
-
-        sanitizeTitle(project, merged);
-        return merged;
     }
 
     @Transactional
@@ -334,82 +252,84 @@ public class ProjectService {
         }
 
         AiResponseDto.TemplateDto template = aiResponse.templates().get(0);
-
         ProjectSessionSummary summary = summaryRepository.findByProject(project)
-                .orElseGet(() -> ProjectSessionSummary.builder()
-                        .project(project)
-                        .build());
+                .orElseGet(() -> ProjectSessionSummary.builder().project(project).build());
 
-        String nextTitle = hasText(summary.getTitle())
-                ? summary.getTitle()
-                : firstNonBlank(template.title(), project.getName());
+        // AI가 수집한 전체 데이터(collected_data)를 Map으로 가져오기
+        Map<String, Object> aiData = safeAiCollectedData(project);
 
-        String nextSubject = hasText(summary.getSubject())
-                ? summary.getSubject()
-                : project.getSubject();
+        // 1. Title: template.title() 최우선 -> aiData -> 기존 summary -> project.name
+        String nextTitle = firstNonBlank(template.title(), asString(aiData.get("title")), summary.getTitle(), project.getName());
 
-        String nextGoal = hasText(summary.getGoal())
-                ? summary.getGoal()
-                : (template.content() != null ? String.valueOf(template.content()) : null);
+        // 2. Subject: aiData 최우선 -> 기존 summary -> project.subject
+        String nextSubject = firstNonBlank(asString(aiData.get("subject")), summary.getSubject(), project.getSubject());
 
-        String nextTeamSize = hasText(summary.getTeamSize()) ? summary.getTeamSize() : "미지정";
-        String nextRoles = hasText(summary.getRoles()) ? summary.getRoles() : "AI 분석 역할";
-        String nextDueDate = hasText(summary.getDueDate()) ? summary.getDueDate() : "기한 미정";
-        String nextDeliverables = hasText(summary.getDeliverables()) ? summary.getDeliverables() : "AI 생성 결과물";
-
-        summary.updateAll(
-                nextTitle,
-                nextSubject,
-                nextGoal,
-                nextTeamSize,
-                nextRoles,
-                nextDueDate,
-                nextDeliverables,
-                project.getLeader(),
-                "AI"
+        // 3. Goal: template.content() 최우선 -> aiData -> 기존 summary
+        String nextGoal = firstNonBlank(
+                (template.content() != null ? String.valueOf(template.content()) : null),
+                asString(aiData.get("goal")),
+                summary.getGoal()
         );
 
+        // 4. 나머지 필드들: aiData(collected_data)에서 우선적으로 꺼내기
+        String nextTeamSize = firstNonBlank(asString(aiData.get("teamSize")), summary.getTeamSize(), "미지정");
+        String nextRoles = firstNonBlank(asString(aiData.get("roles")), summary.getRoles(), "AI 분석 역할");
+        String nextDueDate = firstNonBlank(asString(aiData.get("dueDate")), summary.getDueDate(), "기한 미정");
+        String nextDeliverables = firstNonBlank(asString(aiData.get("deliverables")), summary.getDeliverables(), "AI 생성 결과물");
+
+        // 엔티티 업데이트
+        summary.updateAll(nextTitle, nextSubject, nextGoal, nextTeamSize, nextRoles, nextDueDate, nextDeliverables, project.getLeader(), "AI");
+
         summaryRepository.save(summary);
+
+        // AI가 업데이트한 내용을 다시 AI 컨텍스트에 동기화
+        syncSummaryToAiContext(project, summary);
+    }
+
+    private void syncSummaryToAiContext(Project project, ProjectSessionSummary summary) {
+        try {
+            Map<String, Object> aiData = safeAiCollectedData(project);
+            Map<String, Object> summaryMap = summary.toDataMap();
+            if (summaryMap != null) {
+                aiData.putAll(summaryMap);
+            }
+            String updatedAiDataJson = objectMapper.writeValueAsString(aiData);
+            String currentStatus = hasText(project.getAiCurrentStatus()) ? project.getAiCurrentStatus() : "EXPLORE";
+            project.updateAiContext(currentStatus, updatedAiDataJson);
+        } catch (Exception e) {
+            log.error("AI 컨텍스트 동기화 실패: {}", e.getMessage());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> buildCollectedData(Project project) {
+        Map<String, Object> merged = new HashMap<>(safeAiCollectedData(project));
+        summaryRepository.findByProject(project).ifPresent(summary -> {
+            Map<String, Object> summaryMap = summary.toDataMap();
+            if (summaryMap != null) merged.putAll(summaryMap);
+        });
+        sanitizeTitle(project, merged);
+        return merged;
     }
 
     private Map<String, Object> safeAiCollectedData(Project project) {
         try {
             Map<String, Object> map = project.getAiCollectedDataMap();
             return map != null ? new HashMap<>(map) : new HashMap<>();
-        } catch (Exception e) {
-            return new HashMap<>();
-        }
+        } catch (Exception e) { return new HashMap<>(); }
     }
 
     private void sanitizeTitle(Project project, Map<String, Object> collectedData) {
         String currentTitle = asString(collectedData.get("title"));
-        if (!hasText(currentTitle)) {
-            collectedData.put("title", project.getName());
-            return;
-        }
-        collectedData.put("title", currentTitle.trim());
+        collectedData.put("title", hasText(currentTitle) ? currentTitle.trim() : project.getName());
     }
 
-    private void overlayNonBlank(Map<String, Object> target, String key, Object value) {
-        if (value == null) return;
-        if (value instanceof String str) {
-            if (hasText(str)) target.put(key, str.trim());
-            return;
-        }
-        target.put(key, value);
-    }
+    private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
 
-    private boolean hasText(String value) {
-        return value != null && !value.trim().isEmpty();
-    }
+    private String asString(Object value) { return value == null ? null : String.valueOf(value); }
 
-    private String asString(Object value) {
-        return value == null ? null : String.valueOf(value);
-    }
-
-    private String firstNonBlank(String first, String second) {
-        if (hasText(first)) return first.trim();
-        if (hasText(second)) return second.trim();
+    private String firstNonBlank(String... values) {
+        for (String v : values) { if (hasText(v)) return v.trim(); }
         return null;
     }
 }
