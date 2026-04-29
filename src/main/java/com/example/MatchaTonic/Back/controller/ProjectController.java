@@ -108,6 +108,17 @@ public class ProjectController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(summary = "프로젝트 세션 요약 정보만 조회")
+    @GetMapping("/{projectId}/summary")
+    public ResponseEntity<ProjectDto.SessionSummaryDto> getProjectSummary(
+            @PathVariable Long projectId,
+            @Parameter(hidden = true) @AuthenticationPrincipal String email) {
+
+        User user = getUserFromEmail(email);
+        ProjectDto.SessionSummaryDto response = projectService.getProjectSummaryOnly(projectId, user);
+        return ResponseEntity.ok(response);
+    }
+
     @Operation(summary = "프로젝트 정보 및 세션 요약 수동 업데이트 ")
     @PatchMapping("/{projectId}/summary")
     public ResponseEntity<String> updateSessionSummary(

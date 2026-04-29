@@ -117,7 +117,7 @@ public class ProjectService {
                 .build();
     }
 
-    // [수정 핵심] 프로젝트 삭제
+    // 프로젝트 삭제
     @Transactional
     public void deleteProject(Long projectId, User user) {
         Project project = projectRepository.findById(projectId)
@@ -146,6 +146,34 @@ public class ProjectService {
         projectRepository.flush();
 
         log.info("프로젝트 삭제 프로세스 완료 - ID: {}", projectId);
+    }
+
+    // [추가됨] 세션 요약 정보 단독 조회
+    @Transactional(readOnly = true)
+    public ProjectDto.SessionSummaryDto getProjectSummaryOnly(Long projectId, User user) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("프로젝트를 찾을 수 없습니다."));
+
+        projectMemberRepository.findByUserAndProject(user, project)
+                .orElseThrow(() -> new IllegalStateException("해당 프로젝트에 접근 권한이 없습니다."));
+
+        ProjectSessionSummary summary = summaryRepository.findByProject(project).orElse(null);
+
+        if (summary == null) {
+            return null;
+        }
+
+        return ProjectDto.SessionSummaryDto.builder()
+                .title(summary.getTitle())
+                .subject(summary.getSubject())
+                .goal(summary.getGoal())
+                .teamSize(summary.getTeamSize())
+                .roles(summary.getRoles())
+                .dueDate(summary.getDueDate())
+                .deliverables(summary.getDeliverables())
+                .updatedSource(summary.getUpdatedSource())
+                .updatedAt(summary.getUpdatedAt())
+                .build();
     }
 
     // 상세조회
