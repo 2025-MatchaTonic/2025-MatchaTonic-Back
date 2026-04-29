@@ -32,7 +32,7 @@ public class ProjectService {
     private final ProjectMemberRepository projectMemberRepository;
     private final ProjectSessionSummaryRepository summaryRepository;
     private final ObjectMapper objectMapper;
-    private final EntityManager entityManager; // 영속성 컨텍스트 제어를 위해 추가
+    private final EntityManager entityManager;
 
     // 프로젝트 생성
     public ProjectDto.CreateResponse createProject(ProjectDto.CreateRequest request, User leader) {
@@ -134,8 +134,7 @@ public class ProjectService {
         projectRepository.deleteChatMessagesByProjectId(projectId);
         projectMemberRepository.deleteMembersByProjectId(projectId);
 
-        // 2. [가장 중요] 벌크 삭제 후 1차 캐시를 비워버림
-        // 이걸 안 하면 project 객체가 삭제된 자식들을 계속 잡고 있어서 Transient 에러가 남
+        // 2. 벌크 삭제 후 1차 캐시를 비우기 -> 이걸 안 하면 project 객체가 삭제된 자식들을 계속 잡고 있어서 Transient 에러가 남
         entityManager.flush();
         entityManager.clear();
 
@@ -164,6 +163,7 @@ public class ProjectService {
         if (summary != null) {
             summaryDto = ProjectDto.SessionSummaryDto.builder()
                     .title(summary.getTitle())
+                    .subject(summary.getSubject())
                     .goal(summary.getGoal())
                     .teamSize(summary.getTeamSize())
                     .roles(summary.getRoles())
@@ -209,6 +209,10 @@ public class ProjectService {
                 ? request.getTitle().trim()
                 : firstNonBlank(summary.getTitle(), project.getName());
 
+        String nextSubject = hasText(request.getSubject())
+                ? request.getSubject().trim()
+                : summary.getSubject();
+
         String nextGoal = hasText(request.getGoal())
                 ? request.getGoal().trim()
                 : summary.getGoal();
@@ -231,6 +235,7 @@ public class ProjectService {
 
         summary.updateAll(
                 nextTitle,
+                nextSubject,
                 nextGoal,
                 nextTeamSize,
                 nextRoles,
@@ -311,6 +316,10 @@ public class ProjectService {
                 ? summary.getTitle()
                 : firstNonBlank(template.title(), project.getName());
 
+        String nextSubject = hasText(summary.getSubject())
+                ? summary.getSubject()
+                : project.getSubject();
+
         String nextGoal = hasText(summary.getGoal())
                 ? summary.getGoal()
                 : (template.content() != null ? String.valueOf(template.content()) : null);
@@ -322,6 +331,7 @@ public class ProjectService {
 
         summary.updateAll(
                 nextTitle,
+                nextSubject,
                 nextGoal,
                 nextTeamSize,
                 nextRoles,

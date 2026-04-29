@@ -80,6 +80,7 @@ public class ProjectDto {
     @AllArgsConstructor
     public static class SessionSummaryDto {
         private String title;
+        private String subject;
         private String goal;
         private String teamSize;
         private String roles;

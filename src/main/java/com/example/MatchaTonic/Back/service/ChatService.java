@@ -110,6 +110,7 @@ public class ChatService {
                             .senderName("Promate AI")
                             .senderEmail("ai@promate.ai")
                             .message(response.content())
+                            .collectedData(response.collectedData())
                             .timestamp(LocalDateTime.now())
                             .build();
 
@@ -133,13 +134,14 @@ public class ChatService {
             project.updateAiContext(newStatus, newCollectedDataJson);
             projectRepository.save(project);
 
-            // 2. Summary 테이블 동기화 (보수적 접근)
+            // 2. Summary 테이블 동기화
             ProjectSessionSummary summary = summaryRepository.findByProject(project)
                     .orElseGet(() -> ProjectSessionSummary.builder().project(project).build());
 
             // 헬퍼 메서드(getSafeValue)를 통해 수동값이 없을 때만 AI 값으로 채움
             summary.updateAll(
-                    getSafeValue(summary.getTitle(), aiData.get("title")),
+                    getSafeTitleValue(summary.getTitle(), aiData.get("title")),
+                    getSafeValue(summary.getSubject(), aiData.get("subject")),
                     getSafeValue(summary.getGoal(), aiData.get("goal")),
                     getSafeValue(summary.getTeamSize(), aiData.get("teamSize")),
                     getSafeValue(summary.getRoles(), aiData.get("roles")),
@@ -151,6 +153,13 @@ public class ChatService {
         } catch (Exception e) {
             log.error("데이터 동기화 실패: {}", e.getMessage(), e);
         }
+    }
+
+    private String getSafeTitleValue(String current, Object newValue) {
+        if (current == null || current.trim().isEmpty() || current.equals("새 프로젝트") || current.contains("새 프로젝트")) {
+            return newValue != null ? newValue.toString() : null;
+        }
+        return current;
     }
 
     // 기존 값(current)이 존재하면 유지하고, 비어있을 때만 새 값(newValue)을 채움

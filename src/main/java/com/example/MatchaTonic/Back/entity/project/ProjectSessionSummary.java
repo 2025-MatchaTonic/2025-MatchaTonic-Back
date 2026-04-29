@@ -25,15 +25,18 @@ public class ProjectSessionSummary {
     @JoinColumn(name = "project_id", unique = true)
     private Project project;
 
-    private String title;         // 프로젝트 명칭
+    private String title;
 
     @Column(columnDefinition = "TEXT")
-    private String goal;          // 목표
-
-    private String teamSize;      // 팀 규모
+    private String subject;
 
     @Column(columnDefinition = "TEXT")
-    private String roles;         // 역할 분담
+    private String goal;
+
+    private String teamSize;
+
+    @Column(columnDefinition = "TEXT")
+    private String roles;
 
     private String dueDate;
 
@@ -50,11 +53,12 @@ public class ProjectSessionSummary {
     private LocalDateTime updatedAt;
 
     @Builder
-    public ProjectSessionSummary(Project project, String title, String goal, String teamSize,
+    public ProjectSessionSummary(Project project, String title, String subject, String goal, String teamSize,
                                  String roles, String dueDate, String deliverables,
                                  User updatedBy, String updatedSource) {
         this.project = project;
         this.title = title;
+        this.subject = subject;
         this.goal = goal;
         this.teamSize = teamSize;
         this.roles = roles;
@@ -64,10 +68,10 @@ public class ProjectSessionSummary {
         this.updatedSource = updatedSource;
     }
 
-    // 데이터를 Map으로 변환하여 AI 요청 시 Merge하기 편하게 해주는 메서드
     public Map<String, Object> toDataMap() {
         Map<String, Object> data = new HashMap<>();
         if (title != null) data.put("title", title);
+        if (subject != null) data.put("subject", subject);
         if (goal != null) data.put("goal", goal);
         if (teamSize != null) data.put("teamSize", teamSize);
         if (roles != null) data.put("roles", roles);
@@ -76,10 +80,10 @@ public class ProjectSessionSummary {
         return data;
     }
 
-    // 업데이트를 위한 편의 메서드
-    public void updateAll(String title, String goal, String teamSize, String roles,
+    public void updateAll(String title, String subject, String goal, String teamSize, String roles,
                           String dueDate, String deliverables, User updatedBy, String updatedSource) {
         this.title = title;
+        this.subject = subject;
         this.goal = goal;
         this.teamSize = teamSize;
         this.roles = roles;
