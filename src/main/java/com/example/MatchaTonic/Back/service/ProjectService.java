@@ -320,8 +320,17 @@ public class ProjectService {
     }
 
     private void sanitizeTitle(Project project, Map<String, Object> collectedData) {
+        if (hasText(project.getName())) {
+            collectedData.put("projectName", project.getName().trim());
+        }
+
         String currentTitle = asString(collectedData.get("title"));
-        collectedData.put("title", hasText(currentTitle) ? currentTitle.trim() : project.getName());
+
+        if (!hasText(currentTitle) || currentTitle.trim().equals(project.getName())) {
+            collectedData.remove("title");
+            return;
+        }
+        collectedData.put("title", currentTitle.trim());
     }
 
     private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }

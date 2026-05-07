@@ -88,7 +88,7 @@ public class ChatService {
             AiChatRequestDto request = AiChatRequestDto.builder()
                     .projectId(project.getId())
                     .content(userDto.getMessage())
-                    .actionType("CHAT")
+                    .actionType(inferAiActionType(userDto.getMessage()))
                     .currentStatus(currentStatus)
                     .collectedData(finalData)
                     .recentMessages(recentMessages)
@@ -230,5 +230,23 @@ public class ChatService {
                         .timestamp(m.getTimestamp())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+
+    private String inferAiActionType(String message) {
+        String text = message == null ? "" : message.trim();
+
+        // 1. '주제 없음' 버튼 클릭 시
+        if (text.contains("BTN_NO") || text.matches("(?s).*주제\\s*(가|는)?\\s*없.*")) {
+            return "BTN_NO";
+        }
+
+        // 2. '예' 버튼 클릭 시
+        if (text.contains("BTN_YES") || text.contains("BTN_GO_DEF")) {
+            return "BTN_YES";
+        }
+
+        // 3. 일반 채팅
+        return "CHAT";
     }
 }
