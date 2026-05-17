@@ -25,10 +25,11 @@ public class NotionOAuthController {
 
     @GetMapping("/oauth/start")
     public ResponseEntity<NotionOAuthDto.StartResponse> startOAuth(
-            @Parameter(hidden = true) @AuthenticationPrincipal String email
+            @Parameter(hidden = true) @AuthenticationPrincipal String email,
+            @RequestParam(required = false) String returnTo
     ) {
         User user = getUserFromEmail(email);
-        return ResponseEntity.ok(new NotionOAuthDto.StartResponse(notionOAuthService.createAuthorizationUrl(user)));
+        return ResponseEntity.ok(new NotionOAuthDto.StartResponse(notionOAuthService.createAuthorizationUrl(user, returnTo)));
     }
 
     @GetMapping("/oauth/callback")

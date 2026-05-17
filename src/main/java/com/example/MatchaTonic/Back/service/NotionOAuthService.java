@@ -13,6 +13,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -51,12 +52,16 @@ public class NotionOAuthService {
     @Value("${notion.oauth.failure-redirect:https://promate.ai.kr/?notion=failed#export-notion}")
     private String failureRedirectUrl;
 
-    public String createAuthorizationUrl(User user) {
+    public String createAuthorizationUrl(User user, String returnTo) {
         assertConfigured();
         cleanupExpiredStates();
 
         String state = UUID.randomUUID().toString();
-        pendingStates.put(state, new PendingAuthorization(user.getEmail(), Instant.now().plus(STATE_TTL)));
+        pendingStates.put(state, new PendingAuthorization(
+                user.getEmail(),
+                sanitizeReturnTo(returnTo),
+                Instant.now().plus(STATE_TTL)
+        ));
 
         return UriComponentsBuilder.fromHttpUrl(NOTION_AUTHORIZE_URL)
                 .queryParam("owner", "user")
@@ -95,10 +100,10 @@ public class NotionOAuthService {
                     tokenResponse.workspaceName()
             );
             userRepository.save(user);
-            return effectiveSuccessRedirectUrl();
+            return redirectWithStatus(resolveReturnTo(pending), "connected");
         } catch (Exception e) {
             log.error("Notion OAuth callback failed: {}", e.getMessage(), e);
-            return redirectWithMessage(effectiveFailureRedirectUrl(), "Notion connection failed.");
+            return redirectWithMessage(resolveReturnTo(pending), "Notion connection failed.");
         }
     }
 
@@ -167,6 +172,17 @@ public class NotionOAuthService {
                 .toUriString();
     }
 
+    private String redirectWithStatus(String baseUrl, String status) {
+        return UriComponentsBuilder.fromUriString(baseUrl)
+                .queryParam("notion", status)
+                .build()
+                .toUriString();
+    }
+
+    private String resolveReturnTo(PendingAuthorization pending) {
+        return hasText(pending.returnTo()) ? pending.returnTo() : effectiveSuccessRedirectUrl();
+    }
+
     private String effectiveRedirectUri() {
         return hasText(redirectUri) ? redirectUri : DEFAULT_REDIRECT_URI;
     }
@@ -183,11 +199,36 @@ public class NotionOAuthService {
         return value != null && !value.isBlank();
     }
 
+    private String sanitizeReturnTo(String returnTo) {
+        if (!hasText(returnTo)) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(returnTo);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) || host == null) {
+                return null;
+            }
+            if (
+                    "localhost".equalsIgnoreCase(host) ||
+                    "promate.ai.kr".equalsIgnoreCase(host) ||
+                    host.endsWith(".promate.ai.kr") ||
+                    host.endsWith(".vercel.app")
+            ) {
+                return returnTo;
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
+    }
+
     private String asString(Object value) {
         return value == null ? null : String.valueOf(value);
     }
 
-    private record PendingAuthorization(String email, Instant expiresAt) {
+    private record PendingAuthorization(String email, String returnTo, Instant expiresAt) {
     }
 
     private record NotionTokenResponse(
