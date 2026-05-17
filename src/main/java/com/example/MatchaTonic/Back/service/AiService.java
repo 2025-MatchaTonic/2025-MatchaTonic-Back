@@ -61,7 +61,10 @@ public class AiService {
             notionService.createProjectPagesOnNotion(
                     aiResponse,
                     request.notionToken(),
-                    request.pageUrl()
+                    request.pageUrl(),
+                    project.getSubject(),
+                    project.getSessionSummaryText(),
+                    projectService.getProjectMembers(project.getId()).getMembers()
             );
         } catch (IllegalArgumentException e) {
             throw e;

@@ -1,6 +1,7 @@
 package com.example.MatchaTonic.Back.service;
 
 import com.example.MatchaTonic.Back.dto.AiResponseDto;
+import com.example.MatchaTonic.Back.dto.MemberDto;
 import com.example.MatchaTonic.Back.dto.NotionOAuthDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -66,7 +67,7 @@ public class NotionService {
      * @param userToken 사용자가 직접 입력한 노션 통합 토큰
      * @param pageUrl 사용자가 직접 입력한 부모 페이지 URL
      */
-    public void createProjectPagesOnNotion(AiResponseDto aiResponse, String userToken, String pageUrl) {
+    public void createProjectPagesOnNotion(AiResponseDto aiResponse, String userToken, String pageUrl, String projectSubject, String projectSummary, List<MemberDto.InfoResponse> members) {
         if (aiResponse == null || aiResponse.templates() == null) {
             log.error("AI 응답 데이터가 비어있어 노션 생성을 중단합니다.");
             throw new IllegalArgumentException("AI가 생성한 노션 템플릿 데이터가 없습니다.");
@@ -104,7 +105,7 @@ public class NotionService {
                 }
 
                 // 사용자가 전달한 토큰을 사용하여 호출
-                String createdPageId = callNotionApi(userToken, parentId, template);
+                String createdPageId = callNotionApi(userToken, parentId, template, projectSubject, projectSummary, members);
                 if (createdPageId != null) {
                     pageKeyToIdMap.put(template.key(), createdPageId);
                     if (template.parentKey() == null) {
@@ -152,7 +153,7 @@ public class NotionService {
         return null;
     }
 
-    private String callNotionApi(String token, String parentId, AiResponseDto.TemplateDto template) {
+    private String callNotionApi(String token, String parentId, AiResponseDto.TemplateDto template, String projectSubject, String projectSummary, List<MemberDto.InfoResponse> members) {
         String url = "https://api.notion.com/v1/pages";
         HttpHeaders headers = createNotionHeaders(token);
 
@@ -163,7 +164,7 @@ public class NotionService {
         ));
 
         List<Map<String, Object>> children = new ArrayList<>();
-        addDashboardIntroBlocks(template, children);
+        addDashboardIntroBlocks(template, children, projectSubject, projectSummary, members);
         parseContentToBlocks(template.content(), children);
 
         if (!children.isEmpty()) {
@@ -314,19 +315,24 @@ public class NotionService {
         return value == null ? null : String.valueOf(value);
     }
 
-    private void addDashboardIntroBlocks(AiResponseDto.TemplateDto template, List<Map<String, Object>> blocks) {
-        String summary = extractSummaryLine(template.content());
-        if (summary.isBlank()) {
-            summary = template.title() == null || template.title().isBlank()
-                    ? "프로젝트 핵심 내용을 한눈에 확인하고 실행 계획을 관리합니다."
-                    : template.title() + " 프로젝트의 핵심 목표와 실행 정보를 관리합니다.";
+    private void addDashboardIntroBlocks(AiResponseDto.TemplateDto template, List<Map<String, Object>> blocks, String projectSubject, String projectSummary, List<MemberDto.InfoResponse> members) {
+        // 최상위 루트 페이지(대시보드)에만 추가되도록 처리 (하위 페이지에는 제외)
+        if (template.parentKey() != null) {
+            return;
         }
 
-        blocks.add(createCalloutBlock("학생들이 사용할 핵심 가치", summary, "📌", "gray_background"));
+        String titleText = (projectSubject != null && !projectSubject.isBlank()) ? projectSubject : "프로젝트 요약";
+        String summaryBody = (projectSummary != null && !projectSummary.isBlank())
+                ? projectSummary
+                : "세부 내용이 등록되지 않았습니다.";
+
+        String title = titleText + "\n\n" + summaryBody;
+        blocks.add(createCalloutBlock(title, "📌", "gray_background"));
+
         blocks.add(createHeadingBlock("팀원 정보"));
-        blocks.add(createTeamInfoTableBlock());
+        blocks.add(createTeamInfoTableBlock(members));
         blocks.add(createDividerBlock());
-        blocks.add(createCalloutBlock("운영 팁", "아래 회의록과 일정 데이터베이스를 팀 상황에 맞게 채워가세요.", "💡", "blue_background"));
+        blocks.add(createCalloutBlock("📂 하위 문서", "기획, 개발, DB 등의 하위 문서는 노션 API 정책 상 이 콜아웃 아래에 [하위 페이지] 형태로 자동 생성됩니다.", "💡", "blue_background"));
     }
 
     private String extractSummaryLine(Object content) {
@@ -411,6 +417,18 @@ public class NotionService {
                 "bulleted_list_item", Map.of("rich_text", List.of(textObject(text))));
     }
 
+    private Map<String, Object> createCalloutBlock(String text, String emoji, String color) {
+        return Map.of(
+                "object", "block",
+                "type", "callout",
+                "callout", Map.of(
+                        "rich_text", List.of(textObject(text)),
+                        "icon", Map.of("type", "emoji", "emoji", emoji),
+                        "color", color
+                )
+        );
+    }
+
     private Map<String, Object> createCalloutBlock(String title, String body, String emoji, String color) {
         List<Map<String, Object>> richText = new ArrayList<>();
         richText.add(textObject(title + "\n"));
@@ -426,13 +444,23 @@ public class NotionService {
         );
     }
 
-    private Map<String, Object> createTeamInfoTableBlock() {
-        List<Map<String, Object>> rows = List.of(
-                tableRow("이름", "포지션", "이메일", "연락처"),
-                tableRow("", "PM / 기획", "", ""),
-                tableRow("", "백엔드", "", ""),
-                tableRow("", "프론트엔드", "", "")
-        );
+    private Map<String, Object> createTeamInfoTableBlock(List<MemberDto.InfoResponse> members) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        rows.add(tableRow("이름", "포지션", "이메일", "연락처"));
+
+        if (members != null && !members.isEmpty()) {
+            for (MemberDto.InfoResponse member : members) {
+                String name = member.getName() != null ? member.getName() : "";
+                String role = member.getRole() != null ? member.getRole() : "";
+                String email = member.getEmail() != null ? member.getEmail() : "";
+                String contact = ""; // DB에 연락처 필드가 없으므로 빈 문자열 처리
+                
+                rows.add(tableRow(name, role, email, contact));
+            }
+        } else {
+            rows.add(tableRow("", "", "", ""));
+        }
+
         return Map.of(
                 "object", "block",
                 "type", "table",
