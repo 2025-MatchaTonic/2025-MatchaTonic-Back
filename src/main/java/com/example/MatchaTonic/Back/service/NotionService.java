@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -105,6 +107,9 @@ public class NotionService {
                 String createdPageId = callNotionApi(userToken, parentId, template);
                 if (createdPageId != null) {
                     pageKeyToIdMap.put(template.key(), createdPageId);
+                    if (template.parentKey() == null) {
+                        createDashboardDatabases(userToken, createdPageId);
+                    }
                     createdCount++;
                 }
             } catch (Exception e) {
@@ -158,6 +163,7 @@ public class NotionService {
         ));
 
         List<Map<String, Object>> children = new ArrayList<>();
+        addDashboardIntroBlocks(template, children);
         parseContentToBlocks(template.content(), children);
 
         if (!children.isEmpty()) {
@@ -187,6 +193,91 @@ public class NotionService {
         }
         String compactBody = body.replaceAll("\\s+", " ").trim();
         return compactBody.length() > 500 ? compactBody.substring(0, 500) + "..." : compactBody;
+    }
+
+    private void createDashboardDatabases(String token, String parentPageId) {
+        String today = LocalDate.now(ZoneId.of("Asia/Seoul")).toString();
+
+        String meetingDatabaseId = createDatabase(token, parentPageId, "회의록", Map.of(
+                "구분", Map.of("title", Map.of()),
+                "날짜", Map.of("date", Map.of()),
+                "방식", Map.of("select", Map.of("options", List.of(
+                        selectOption("온라인", "blue"),
+                        selectOption("오프라인", "brown"),
+                        selectOption("하이브리드", "purple")
+                ))),
+                "URL", Map.of("url", Map.of()),
+                "참여자", Map.of("rich_text", Map.of())
+        ));
+        createDatabasePage(token, meetingDatabaseId, Map.of(
+                "구분", titleProperty("첫번째 회의"),
+                "날짜", dateProperty(today),
+                "방식", selectProperty("오프라인"),
+                "참여자", richTextProperty("")
+        ));
+
+        String scheduleDatabaseId = createDatabase(token, parentPageId, "일정", Map.of(
+                "일정", Map.of("title", Map.of()),
+                "날짜", Map.of("date", Map.of()),
+                "상태", Map.of("select", Map.of("options", List.of(
+                        selectOption("예정", "gray"),
+                        selectOption("진행중", "blue"),
+                        selectOption("완료", "green")
+                ))),
+                "담당", Map.of("rich_text", Map.of()),
+                "메모", Map.of("rich_text", Map.of())
+        ));
+        createDatabasePage(token, scheduleDatabaseId, Map.of(
+                "일정", titleProperty("프로젝트 킥오프"),
+                "날짜", dateProperty(today),
+                "상태", selectProperty("예정"),
+                "담당", richTextProperty("전체"),
+                "메모", richTextProperty("초기 목표와 역할을 정리합니다.")
+        ));
+    }
+
+    private String createDatabase(String token, String parentPageId, String title, Map<String, Object> properties) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("parent", Map.of("type", "page_id", "page_id", parentPageId));
+        body.put("title", List.of(textObject(title)));
+        body.put("properties", properties);
+
+        try {
+            ResponseEntity<Map> response = restTemplate.postForEntity(
+                    "https://api.notion.com/v1/databases",
+                    new HttpEntity<>(body, createNotionHeaders(token)),
+                    Map.class
+            );
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                Object id = response.getBody().get("id");
+                if (id != null) {
+                    return id.toString();
+                }
+            }
+            throw new RuntimeException("Notion database API returned " + response.getStatusCode());
+        } catch (RestClientResponseException e) {
+            String responseBody = summarizeResponseBody(e.getResponseBodyAsString());
+            log.error("Notion database creation failed status={} body={}", e.getStatusCode(), responseBody);
+            throw new RuntimeException("Notion database creation failed: " + e.getStatusCode() + " " + responseBody, e);
+        }
+    }
+
+    private void createDatabasePage(String token, String databaseId, Map<String, Object> properties) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("parent", Map.of("database_id", databaseId));
+        body.put("properties", properties);
+
+        try {
+            restTemplate.postForEntity(
+                    "https://api.notion.com/v1/pages",
+                    new HttpEntity<>(body, createNotionHeaders(token)),
+                    Map.class
+            );
+        } catch (RestClientResponseException e) {
+            String responseBody = summarizeResponseBody(e.getResponseBodyAsString());
+            log.error("Notion database row creation failed status={} body={}", e.getStatusCode(), responseBody);
+            throw new RuntimeException("Notion database row creation failed: " + e.getStatusCode() + " " + responseBody, e);
+        }
     }
 
     private HttpHeaders createNotionHeaders(String token) {
@@ -223,6 +314,61 @@ public class NotionService {
         return value == null ? null : String.valueOf(value);
     }
 
+    private void addDashboardIntroBlocks(AiResponseDto.TemplateDto template, List<Map<String, Object>> blocks) {
+        String summary = extractSummaryLine(template.content());
+        if (summary.isBlank()) {
+            summary = template.title() == null || template.title().isBlank()
+                    ? "프로젝트 핵심 내용을 한눈에 확인하고 실행 계획을 관리합니다."
+                    : template.title() + " 프로젝트의 핵심 목표와 실행 정보를 관리합니다.";
+        }
+
+        blocks.add(createCalloutBlock("학생들이 사용할 핵심 가치", summary, "📌", "gray_background"));
+        blocks.add(createHeadingBlock("팀원 정보"));
+        blocks.add(createTeamInfoTableBlock());
+        blocks.add(createDividerBlock());
+        blocks.add(createCalloutBlock("운영 팁", "아래 회의록과 일정 데이터베이스를 팀 상황에 맞게 채워가세요.", "💡", "blue_background"));
+    }
+
+    private String extractSummaryLine(Object content) {
+        List<String> snippets = new ArrayList<>();
+        collectPlainText(content, snippets);
+        return snippets.stream()
+                .map(String::trim)
+                .filter(text -> !text.isBlank())
+                .findFirst()
+                .map(text -> text.length() > 180 ? text.substring(0, 180) : text)
+                .orElse("");
+    }
+
+    private void collectPlainText(Object content, List<String> snippets) {
+        if (content == null || snippets.size() >= 3) {
+            return;
+        }
+        if (content instanceof String text) {
+            if (!text.trim().isBlank()) {
+                snippets.add(text.trim());
+            }
+            return;
+        }
+        if (content instanceof Map<?, ?> map) {
+            for (Object value : map.values()) {
+                collectPlainText(value, snippets);
+                if (snippets.size() >= 3) {
+                    return;
+                }
+            }
+            return;
+        }
+        if (content instanceof List<?> list) {
+            for (Object item : list) {
+                collectPlainText(item, snippets);
+                if (snippets.size() >= 3) {
+                    return;
+                }
+            }
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private void parseContentToBlocks(Object content, List<Map<String, Object>> blocks) {
         if (content == null) return;
@@ -257,11 +403,105 @@ public class NotionService {
 
     private Map<String, Object> createParagraphBlock(String text) {
         return Map.of("object", "block", "type", "paragraph",
-                "paragraph", Map.of("rich_text", List.of(Map.of("text", Map.of("content", text)))));
+                "paragraph", Map.of("rich_text", List.of(textObject(text))));
     }
 
     private Map<String, Object> createBulletBlock(String text) {
         return Map.of("object", "block", "type", "bulleted_list_item",
-                "bulleted_list_item", Map.of("rich_text", List.of(Map.of("text", Map.of("content", text)))));
+                "bulleted_list_item", Map.of("rich_text", List.of(textObject(text))));
+    }
+
+    private Map<String, Object> createCalloutBlock(String title, String body, String emoji, String color) {
+        List<Map<String, Object>> richText = new ArrayList<>();
+        richText.add(textObject(title + "\n"));
+        richText.add(textObject(body));
+        return Map.of(
+                "object", "block",
+                "type", "callout",
+                "callout", Map.of(
+                        "rich_text", richText,
+                        "icon", Map.of("type", "emoji", "emoji", emoji),
+                        "color", color
+                )
+        );
+    }
+
+    private Map<String, Object> createTeamInfoTableBlock() {
+        List<Map<String, Object>> rows = List.of(
+                tableRow("이름", "포지션", "이메일", "연락처"),
+                tableRow("", "PM / 기획", "", ""),
+                tableRow("", "백엔드", "", ""),
+                tableRow("", "프론트엔드", "", "")
+        );
+        return Map.of(
+                "object", "block",
+                "type", "table",
+                "table", Map.of(
+                        "table_width", 4,
+                        "has_column_header", true,
+                        "has_row_header", false,
+                        "children", rows
+                )
+        );
+    }
+
+    private Map<String, Object> tableRow(String... cells) {
+        List<List<Map<String, Object>>> rowCells = new ArrayList<>();
+        for (String cell : cells) {
+            rowCells.add(List.of(textObject(cell)));
+        }
+        return Map.of(
+                "object", "block",
+                "type", "table_row",
+                "table_row", Map.of("cells", rowCells)
+        );
+    }
+
+    private Map<String, Object> createDividerBlock() {
+        return Map.of("object", "block", "type", "divider", "divider", Map.of());
+    }
+
+    private Map<String, Object> textObject(String content) {
+        return textObject(content, Map.of());
+    }
+
+    private Map<String, Object> textObject(String content, Map<String, Object> annotations) {
+        Map<String, Object> text = new LinkedHashMap<>();
+        text.put("type", "text");
+        text.put("text", Map.of("content", truncateRichText(content)));
+        if (!annotations.isEmpty()) {
+            text.put("annotations", annotations);
+        }
+        return text;
+    }
+
+    private String truncateRichText(String content) {
+        if (content == null) {
+            return "";
+        }
+        return content.length() > 1900 ? content.substring(0, 1900) : content;
+    }
+
+    private Map<String, Object> selectOption(String name, String color) {
+        return Map.of("name", name, "color", color);
+    }
+
+    private Map<String, Object> titleProperty(String value) {
+        return Map.of("title", List.of(textObject(value)));
+    }
+
+    private Map<String, Object> richTextProperty(String value) {
+        if (value == null || value.isBlank()) {
+            return Map.of("rich_text", List.of());
+        }
+        return Map.of("rich_text", List.of(textObject(value)));
+    }
+
+    private Map<String, Object> dateProperty(String date) {
+        return Map.of("date", Map.of("start", date));
+    }
+
+    private Map<String, Object> selectProperty(String value) {
+        return Map.of("select", Map.of("name", value));
     }
 }
