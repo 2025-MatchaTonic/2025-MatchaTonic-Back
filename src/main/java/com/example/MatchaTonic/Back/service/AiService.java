@@ -65,9 +65,12 @@ public class AiService {
             );
         } catch (IllegalArgumentException e) {
             throw e;
+        } catch (RuntimeException e) {
+            log.error("노션 내보내기 중 오류 발생: {}", e.getMessage(), e);
+            throw e;
         } catch (Exception e) {
             log.error("노션 내보내기 중 오류 발생: {}", e.getMessage(), e);
-            throw new RuntimeException("노션 내보내기 실패", e);
+            throw new RuntimeException("노션 내보내기 실패: " + e.getMessage(), e);
         }
     }
 

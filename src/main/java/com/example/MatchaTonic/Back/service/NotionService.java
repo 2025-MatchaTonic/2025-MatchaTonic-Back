@@ -48,6 +48,7 @@ public class NotionService {
 
         Map<String, String> pageKeyToIdMap = new HashMap<>();
         List<String> failedKeys = new ArrayList<>();
+        List<String> failedDetails = new ArrayList<>();
         int createdCount = 0;
 
         for (AiResponseDto.TemplateDto template : aiResponse.templates()) {
@@ -70,16 +71,20 @@ public class NotionService {
                 }
             } catch (Exception e) {
                 failedKeys.add(template.key());
+                failedDetails.add(template.key() + ": " + e.getMessage());
                 log.error("템플릿 생성 중 오류 발생 - Key: {}, Error: {}", template.key(), e.getMessage());
             }
         }
 
         if (createdCount == 0) {
-            throw new RuntimeException("노션 페이지가 생성되지 않았습니다. 노션 토큰과 부모 페이지 연결 권한을 확인해주세요.");
+            String detail = failedDetails.isEmpty()
+                    ? "노션 토큰과 부모 페이지 연결 권한을 확인해주세요."
+                    : String.join(" / ", failedDetails);
+            throw new RuntimeException("노션 페이지가 생성되지 않았습니다. " + detail);
         }
 
         if (!failedKeys.isEmpty()) {
-            throw new RuntimeException("일부 노션 페이지 생성에 실패했습니다: " + String.join(", ", failedKeys));
+            throw new RuntimeException("일부 노션 페이지 생성에 실패했습니다: " + String.join(" / ", failedDetails));
         }
     }
 
@@ -132,12 +137,21 @@ public class NotionService {
             }
             throw new RuntimeException("Notion API returned " + response.getStatusCode());
         } catch (RestClientResponseException e) {
-            log.error("노션 API 호출 실패 status={} body={}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new RuntimeException("Notion API 호출 실패: " + e.getStatusCode(), e);
+            String body = summarizeResponseBody(e.getResponseBodyAsString());
+            log.error("노션 API 호출 실패 status={} body={}", e.getStatusCode(), body);
+            throw new RuntimeException("Notion API 호출 실패: " + e.getStatusCode() + " " + body, e);
         } catch (Exception e) {
             log.error("노션 API 호출 실패: {}", e.getMessage());
             throw new RuntimeException("Notion API 호출 실패: " + e.getMessage(), e);
         }
+    }
+
+    private String summarizeResponseBody(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+        String compactBody = body.replaceAll("\\s+", " ").trim();
+        return compactBody.length() > 500 ? compactBody.substring(0, 500) + "..." : compactBody;
     }
 
     @SuppressWarnings("unchecked")
