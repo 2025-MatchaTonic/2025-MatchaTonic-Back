@@ -78,22 +78,46 @@ public class ProjectController {
         return ResponseEntity.ok("프로젝트가 삭제되었습니다.");
     }
 
-    @Operation(summary = "AI 분석 및 노션으로 내보내기")
-    @PostMapping("/{projectId}/export")
-    public ResponseEntity<String> exportToNotion(
+    // AI 분석 전용 API (프론트엔드가 맨 처음 템플릿 생성 누를 때 호출)
+    @Operation(summary = "AI 분석 및 템플릿 생성 (노션 전송 X)")
+    @PostMapping("/{projectId}/analyze")
+    public ResponseEntity<String> analyzeProject(
             @PathVariable Long projectId,
             @RequestBody ExportRequestDto exportRequestDto) {
 
         ExportRequestDto finalDto = exportRequestDto.withProjectId(projectId);
 
         try {
-            aiService.processAndExport(finalDto);
-            return ResponseEntity.ok("AI 분석 및 노션 내보내기가 성공적으로 완료되었습니다.");
+            aiService.processAnalysisOnly(finalDto);
+            return ResponseEntity.ok("AI 분석이 성공적으로 완료되었습니다.");
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("AI 분석 중 오류가 발생했습니다: " + e.getMessage());
+        }
+    }
+
+    // 노션 내보내기 전용 API (프론트엔드가 노션 URL 입력 후 호출)
+    @Operation(summary = "분석 결과를 노션으로 내보내기")
+    @PostMapping("/{projectId}/export-to-notion")
+    public ResponseEntity<String> exportToNotion(
+            @PathVariable Long projectId,
+            @RequestBody ExportRequestDto exportRequestDto) {
+
+        // 노션 URL이 비어있는지 사전에 검증하여 500 에러를 방지
+        if (exportRequestDto.pageUrl() == null || exportRequestDto.pageUrl().isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("노션 페이지 URL을 입력해주세요.");
+        }
+
+        ExportRequestDto finalDto = exportRequestDto.withProjectId(projectId);
+
+        try {
+            aiService.exportOnly(finalDto);
+            return ResponseEntity.ok("노션 내보내기가 성공적으로 완료되었습니다.");
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("내보내기 중 오류가 발생했습니다: " + e.getMessage());
+                    .body("노션 내보내기 중 오류가 발생했습니다: " + e.getMessage());
         }
     }
 

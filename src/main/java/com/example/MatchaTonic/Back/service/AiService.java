@@ -26,7 +26,28 @@ public class AiService {
     @Value("${external.api.fastapi.url}")
     private String fastApiUrl;
 
-    public void processAndExport(ExportRequestDto request) {
+    // AI 분석만 수행하는 메서드 (노션 호출 제외)
+    public void processAnalysisOnly(ExportRequestDto request) {
+        Project project = projectRepository.findById(request.projectId())
+                .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다. ID: " + request.projectId()));
+
+        Map<String, Object> aiRequestPayload = createAiRequestPayload(project, request);
+
+        try {
+            log.info("FastAPI 분석 요청 (노션 제외) - ProjectID: {}", request.projectId());
+            log.info("Analyze currentStatus={}", aiRequestPayload.get("currentStatus"));
+
+            // FastAPI 호출하여 분석만 진행 (결과는 반환받지만 노션으로 쏘지 않음)
+            restTemplate.postForObject(fastApiUrl, aiRequestPayload, AiResponseDto.class);
+
+        } catch (Exception e) {
+            log.error("AI 분석 중 오류 발생: {}", e.getMessage(), e);
+            throw new RuntimeException("AI 분석 실패", e);
+        }
+    }
+
+    // AI 분석 결과 생성 및 노션으로 내보내는 메서드
+    public void exportOnly(ExportRequestDto request) {
         Project project = projectRepository.findById(request.projectId())
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다. ID: " + request.projectId()));
 
@@ -34,14 +55,10 @@ public class AiService {
         AiResponseDto aiResponse;
 
         try {
-            log.info("FastAPI 분석 요청 - ProjectID: {}", request.projectId());
-            log.info("Export currentStatus={}", aiRequestPayload.get("currentStatus"));
-            log.info("Export collectedData={}", aiRequestPayload.get("collectedData"));
-
+            log.info("FastAPI 분석 및 노션 내보내기 - ProjectID: {}", request.projectId());
             aiResponse = restTemplate.postForObject(fastApiUrl, aiRequestPayload, AiResponseDto.class);
 
             if (aiResponse != null && aiResponse.templates() != null) {
-                // export 단계에서는 AI 응답으로 수동 summary를 덮어쓰지 않음
                 notionService.createProjectPagesOnNotion(
                         aiResponse,
                         request.notionToken(),
@@ -49,8 +66,8 @@ public class AiService {
                 );
             }
         } catch (Exception e) {
-            log.error("AI 분석 중 오류 발생: {}", e.getMessage(), e);
-            throw new RuntimeException("AI 처리 실패", e);
+            log.error("노션 내보내기 중 오류 발생: {}", e.getMessage(), e);
+            throw new RuntimeException("노션 내보내기 실패", e);
         }
     }
 
