@@ -137,9 +137,9 @@ public class NotionService {
             }
             throw new RuntimeException("Notion API returned " + response.getStatusCode());
         } catch (RestClientResponseException e) {
-            String body = summarizeResponseBody(e.getResponseBodyAsString());
-            log.error("노션 API 호출 실패 status={} body={}", e.getStatusCode(), body);
-            throw new RuntimeException("Notion API 호출 실패: " + e.getStatusCode() + " " + body, e);
+            String responseBody = summarizeResponseBody(e.getResponseBodyAsString());
+            log.error("노션 API 호출 실패 status={} body={}", e.getStatusCode(), responseBody);
+            throw new RuntimeException("Notion API 호출 실패: " + e.getStatusCode() + " " + responseBody, e);
         } catch (Exception e) {
             log.error("노션 API 호출 실패: {}", e.getMessage());
             throw new RuntimeException("Notion API 호출 실패: " + e.getMessage(), e);
