@@ -24,4 +24,15 @@ public record ExportRequestDto(
                 this.pageUrl
         );
     }
+
+    public ExportRequestDto withNotionToken(String notionToken) {
+        return new ExportRequestDto(
+                this.projectId,
+                this.templateType,
+                this.content,
+                this.selectedAnswers,
+                notionToken,
+                this.pageUrl
+        );
+    }
 }

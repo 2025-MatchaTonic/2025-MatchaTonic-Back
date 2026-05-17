@@ -1,7 +1,7 @@
 package com.example.MatchaTonic.Back.service;
 
 import com.example.MatchaTonic.Back.dto.AiResponseDto;
-import com.example.MatchaTonic.Back.entity.project.Project;
+import com.example.MatchaTonic.Back.dto.NotionOAuthDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
@@ -19,6 +19,44 @@ import java.util.regex.Pattern;
 public class NotionService {
 
     private final RestTemplate restTemplate;
+
+    public List<NotionOAuthDto.PageResponse> listAccessiblePages(String token) {
+        if (token == null || token.isBlank()) {
+            throw new IllegalStateException("Notion connection is required.");
+        }
+
+        HttpHeaders headers = createNotionHeaders(token);
+        Map<String, Object> body = Map.of(
+                "filter", Map.of("property", "object", "value", "page"),
+                "sort", Map.of("direction", "descending", "timestamp", "last_edited_time"),
+                "page_size", 50
+        );
+
+        try {
+            ResponseEntity<Map> response = restTemplate.postForEntity(
+                    "https://api.notion.com/v1/search",
+                    new HttpEntity<>(body, headers),
+                    Map.class
+            );
+            Object results = response.getBody() == null ? null : response.getBody().get("results");
+            if (!(results instanceof List<?> pages)) {
+                return List.of();
+            }
+            List<NotionOAuthDto.PageResponse> mappedPages = new ArrayList<>();
+            for (Object item : pages) {
+                if (item instanceof Map<?, ?> page) {
+                    String id = asString(page.get("id"));
+                    String url = asString(page.get("url"));
+                    String title = extractTitle(page);
+                    mappedPages.add(new NotionOAuthDto.PageResponse(id, title, url));
+                }
+            }
+            return mappedPages;
+        } catch (RestClientResponseException e) {
+            String responseBody = summarizeResponseBody(e.getResponseBodyAsString());
+            throw new RuntimeException("Notion page list failed: " + e.getStatusCode() + " " + responseBody, e);
+        }
+    }
 
     /**
      * 노션 페이지 생성 메인 로직
@@ -111,10 +149,7 @@ public class NotionService {
 
     private String callNotionApi(String token, String parentId, AiResponseDto.TemplateDto template) {
         String url = "https://api.notion.com/v1/pages";
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Authorization", "Bearer " + token);
-        headers.set("Notion-Version", "2022-06-28");
-        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpHeaders headers = createNotionHeaders(token);
 
         Map<String, Object> body = new HashMap<>();
         body.put("parent", Map.of("page_id", parentId));
@@ -152,6 +187,40 @@ public class NotionService {
         }
         String compactBody = body.replaceAll("\\s+", " ").trim();
         return compactBody.length() > 500 ? compactBody.substring(0, 500) + "..." : compactBody;
+    }
+
+    private HttpHeaders createNotionHeaders(String token) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token);
+        headers.set("Notion-Version", "2022-06-28");
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return headers;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String extractTitle(Map<?, ?> page) {
+        Object propertiesObject = page.get("properties");
+        if (propertiesObject instanceof Map<?, ?> properties) {
+            for (Object propertyObject : properties.values()) {
+                if (propertyObject instanceof Map<?, ?> property && "title".equals(property.get("type"))) {
+                    Object titleObject = property.get("title");
+                    if (titleObject instanceof List<?> titleItems && !titleItems.isEmpty()) {
+                        Object first = titleItems.get(0);
+                        if (first instanceof Map<?, ?> richText) {
+                            Object plainText = richText.get("plain_text");
+                            if (plainText != null && !plainText.toString().isBlank()) {
+                                return plainText.toString();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return "Untitled";
+    }
+
+    private String asString(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     @SuppressWarnings("unchecked")

@@ -48,10 +48,12 @@ public class SecurityConfig {
 
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/", "/login/**", "/oauth2/**", "/health", "/images/**", "/static/**", "/favicon.ico").permitAll()
+                        .requestMatchers("/api/notion/oauth/callback").permitAll()
                         .requestMatchers("/api/users/**").permitAll()
                         .requestMatchers("/api/manuals/**").permitAll()
                         // 프로젝트 및 채팅 관련 API는 인증 필수 (CORS 리다이렉트 방지 대상)
                         .requestMatchers("/api/projects/**", "/api/project/**").authenticated()
+                        .requestMatchers("/api/notion/**").authenticated()
                         .requestMatchers("/api/chat/**").authenticated()
                         .requestMatchers("/ws-stomp/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()

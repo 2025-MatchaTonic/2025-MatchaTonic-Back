@@ -101,17 +101,23 @@ public class ProjectController {
     @PostMapping("/{projectId}/export-to-notion")
     public ResponseEntity<String> exportToNotion(
             @PathVariable Long projectId,
-            @RequestBody ExportRequestDto exportRequestDto) {
+            @RequestBody ExportRequestDto exportRequestDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal String email) {
 
         // 노션 URL이 비어있는지 사전에 검증하여 500 에러를 방지
         if (exportRequestDto.pageUrl() == null || exportRequestDto.pageUrl().isBlank()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("노션 페이지 URL을 입력해주세요.");
         }
-        if (exportRequestDto.notionToken() == null || exportRequestDto.notionToken().isBlank()) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("노션 통합 토큰을 입력해주세요.");
+        User user = getUserFromEmail(email);
+        String notionToken = exportRequestDto.notionToken();
+        if (notionToken == null || notionToken.isBlank()) {
+            notionToken = user.getNotionAccessToken();
+        }
+        if (notionToken == null || notionToken.isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Notion 연결이 필요합니다.");
         }
 
-        ExportRequestDto finalDto = exportRequestDto.withProjectId(projectId);
+        ExportRequestDto finalDto = exportRequestDto.withProjectId(projectId).withNotionToken(notionToken);
 
         try {
             aiService.exportOnly(finalDto);
