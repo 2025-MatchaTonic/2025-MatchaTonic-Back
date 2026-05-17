@@ -58,13 +58,13 @@ public class AiService {
             log.info("FastAPI 분석 및 노션 내보내기 - ProjectID: {}", request.projectId());
             aiResponse = restTemplate.postForObject(fastApiUrl, aiRequestPayload, AiResponseDto.class);
 
-            if (aiResponse != null && aiResponse.templates() != null) {
-                notionService.createProjectPagesOnNotion(
-                        aiResponse,
-                        request.notionToken(),
-                        request.pageUrl()
-                );
-            }
+            notionService.createProjectPagesOnNotion(
+                    aiResponse,
+                    request.notionToken(),
+                    request.pageUrl()
+            );
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
             log.error("노션 내보내기 중 오류 발생: {}", e.getMessage(), e);
             throw new RuntimeException("노션 내보내기 실패", e);

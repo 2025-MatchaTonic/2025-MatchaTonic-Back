@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
@@ -28,7 +29,12 @@ public class NotionService {
     public void createProjectPagesOnNotion(AiResponseDto aiResponse, String userToken, String pageUrl) {
         if (aiResponse == null || aiResponse.templates() == null) {
             log.error("AI 응답 데이터가 비어있어 노션 생성을 중단합니다.");
-            return;
+            throw new IllegalArgumentException("AI가 생성한 노션 템플릿 데이터가 없습니다.");
+        }
+
+        if (userToken == null || userToken.isBlank()) {
+            log.error("노션 통합 토큰이 비어있어 노션 생성을 중단합니다.");
+            throw new IllegalArgumentException("노션 통합 토큰을 입력해주세요.");
         }
 
         // 1. URL에서 32자리 Page ID 추출
@@ -41,6 +47,8 @@ public class NotionService {
         log.info("추출된 Root Page ID: {}", rootParentPageId);
 
         Map<String, String> pageKeyToIdMap = new HashMap<>();
+        List<String> failedKeys = new ArrayList<>();
+        int createdCount = 0;
 
         for (AiResponseDto.TemplateDto template : aiResponse.templates()) {
             try {
@@ -58,10 +66,20 @@ public class NotionService {
                 String createdPageId = callNotionApi(userToken, parentId, template);
                 if (createdPageId != null) {
                     pageKeyToIdMap.put(template.key(), createdPageId);
+                    createdCount++;
                 }
             } catch (Exception e) {
-                log.error("템플릿 생성 중 개별 오류 발생 (건너뜀) - Key: {}, Error: {}", template.key(), e.getMessage());
+                failedKeys.add(template.key());
+                log.error("템플릿 생성 중 오류 발생 - Key: {}, Error: {}", template.key(), e.getMessage());
             }
+        }
+
+        if (createdCount == 0) {
+            throw new RuntimeException("노션 페이지가 생성되지 않았습니다. 노션 토큰과 부모 페이지 연결 권한을 확인해주세요.");
+        }
+
+        if (!failedKeys.isEmpty()) {
+            throw new RuntimeException("일부 노션 페이지 생성에 실패했습니다: " + String.join(", ", failedKeys));
         }
     }
 
@@ -71,16 +89,17 @@ public class NotionService {
     public String extractPageId(String url) {
         if (url == null || url.isEmpty()) return null;
 
-        // 패턴 설명: 마지막 하이픈(-) 뒤 혹은 마지막 슬래시(/) 뒤의 32자리 hex 문자열을 찾음
-        // 물음표(?) 뒤의 파라미터는 무시
-        Pattern pattern = Pattern.compile("([a-f0-9]{32})");
+        // 물음표(?) 뒤의 파라미터는 무시하고 32자리 또는 하이픈 포함 UUID를 찾음
+        Pattern pattern = Pattern.compile(
+                "([a-fA-F0-9]{32}|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})"
+        );
 
         // URL에서 쿼리 스트링 제거
         String cleanUrl = url.split("\\?")[0];
         Matcher matcher = pattern.matcher(cleanUrl);
 
         if (matcher.find()) {
-            return matcher.group(1);
+            return matcher.group(1).replace("-", "");
         }
         return null;
     }
@@ -108,13 +127,16 @@ public class NotionService {
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
         try {
             ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
-            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 return (String) response.getBody().get("id");
             }
-            return null;
+            throw new RuntimeException("Notion API returned " + response.getStatusCode());
+        } catch (RestClientResponseException e) {
+            log.error("노션 API 호출 실패 status={} body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            throw new RuntimeException("Notion API 호출 실패: " + e.getStatusCode(), e);
         } catch (Exception e) {
-            log.error("노션 API 호출 실패 (토큰 확인 필요): {}", e.getMessage());
-            return null;
+            log.error("노션 API 호출 실패: {}", e.getMessage());
+            throw new RuntimeException("Notion API 호출 실패: " + e.getMessage(), e);
         }
     }
 

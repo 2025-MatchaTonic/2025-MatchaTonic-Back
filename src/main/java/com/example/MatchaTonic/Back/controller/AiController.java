@@ -34,6 +34,9 @@ public class AiController {
         if (request.pageUrl() == null || request.pageUrl().isBlank()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("노션 페이지 URL을 입력해주세요.");
         }
+        if (request.notionToken() == null || request.notionToken().isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("노션 통합 토큰을 입력해주세요.");
+        }
 
         try {
             aiService.exportOnly(request);

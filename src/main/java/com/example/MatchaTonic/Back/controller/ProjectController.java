@@ -107,6 +107,9 @@ public class ProjectController {
         if (exportRequestDto.pageUrl() == null || exportRequestDto.pageUrl().isBlank()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("노션 페이지 URL을 입력해주세요.");
         }
+        if (exportRequestDto.notionToken() == null || exportRequestDto.notionToken().isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("노션 통합 토큰을 입력해주세요.");
+        }
 
         ExportRequestDto finalDto = exportRequestDto.withProjectId(projectId);
 
