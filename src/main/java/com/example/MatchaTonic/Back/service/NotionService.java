@@ -343,12 +343,19 @@ public class NotionService {
 
     private String callNotionApi(String token, String parentId, AiResponseDto.TemplateDto template, String projectSubject, String projectSummary, List<MemberDto.InfoResponse> members) {
         String url = "https://api.notion.com/v1/pages";
-        HttpHeaders headers = createNotionHeaders(token);
+
+        // "01. 기획", "1. 개발" 같은 숫자 prefix 제거
+        String cleanTitle = template.title() != null
+                ? template.title().replaceAll("^\\d+\\.\\s*", "").trim()
+                : "Untitled";
+
+        String pageEmoji = resolvePageEmoji(template);
 
         Map<String, Object> body = new HashMap<>();
         body.put("parent", Map.of("page_id", parentId));
+        body.put("icon", Map.of("type", "emoji", "emoji", pageEmoji));
         body.put("properties", Map.of(
-                "title", Map.of("title", List.of(Map.of("text", Map.of("content", template.title()))))
+                "title", Map.of("title", List.of(Map.of("text", Map.of("content", cleanTitle))))
         ));
 
         List<Map<String, Object>> children = new ArrayList<>();
@@ -361,7 +368,7 @@ public class NotionService {
             body.put("children", children);
         }
 
-        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, createNotionHeaders(token));
         try {
             ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
@@ -431,6 +438,8 @@ public class NotionService {
      * 기획 페이지 안에 고정 하위 페이지들을 DB 데이터로 채워 생성합니다.
      */
     private void createPlanningSubPages(String token, String planningPageId, Map<String, Object> data) {
+        log.info("[Planning] collectedData keys: {}, values: {}", data != null ? data.keySet() : "null", data);
+
         String subject  = asStringFromData(data, "subject", "");
         String goal     = asStringFromData(data, "goal", "");
         String roles    = asStringFromData(data, "roles", "");
@@ -440,20 +449,34 @@ public class NotionService {
         String market   = asStringFromData(data, "market", asStringFromData(data, "marketAnalysis", asStringFromData(data, "시장", "")));
         String usp      = asStringFromData(data, "usp", asStringFromData(data, "differentiator", asStringFromData(data, "차별점", "")));
 
-        createPageWithContent(token, planningPageId, "문제 정의 (Problem)", "🗂️",
-                problem.isBlank() ? (subject.isBlank() ? null : subject) : problem);
+        // 문제 정의: problem > subject > 기본 안내
+        String problemContent = !problem.isBlank() ? problem
+                : !subject.isBlank() ? subject
+                : "## 우리가 해결하려는 문제\n\n- 문제 상황:\n- 문제의 원인:\n- 문제를 겪는 대상:\n\n## 현재 상황 (As-Is)\n\n(현재 상태를 작성하세요)\n\n## 원하는 상황 (To-Be)\n\n(개선 목표를 작성하세요)";
 
-        createPageWithContent(token, planningPageId, "솔루션 (Solution)", "👋",
-                solution.isBlank() ? (goal.isBlank() ? null : goal) : solution);
+        // 솔루션: solution > goal > 기본 안내
+        String solutionContent = !solution.isBlank() ? solution
+                : !goal.isBlank() ? goal
+                : "## 핵심 솔루션\n\n- 솔루션 요약:\n\n## 주요 기능\n\n- 기능 1:\n- 기능 2:\n- 기능 3:\n\n## 기대 효과\n\n- ";
 
-        createPageWithContent(token, planningPageId, "타겟 페르소나 (Target Persona)", "👤",
-                persona.isBlank() ? null : persona);
+        // 타겟 페르소나: persona > 기본 안내
+        String personaContent = !persona.isBlank() ? persona
+                : "## 주요 타겟 사용자\n\n- 연령/직군:\n- 주요 고민:\n- 행동 패턴:\n\n## 사용자 Pain Point\n\n- \n- \n\n## 사용자 Goal\n\n- ";
 
-        createPageWithContent(token, planningPageId, "시장 / 경쟁사 분석 (Market & Competitor)", "📊",
-                market.isBlank() ? null : market);
+        // 시장/경쟁사: market > 기본 안내
+        String marketContent = !market.isBlank() ? market
+                : "## 시장 규모 & 트렌드\n\n- 시장 규모:\n- 성장 트렌드:\n\n## 경쟁사 분석\n\n| 경쟁사 | 강점 | 약점 |\n| --- | --- | --- |\n| | | |\n\n## 기회 요인\n\n- ";
 
-        createPageWithContent(token, planningPageId, "우리의 차별점 (USP)", "⭐",
-                usp.isBlank() ? (roles.isBlank() ? null : roles) : usp);
+        // 우리의 차별점: usp > roles > 기본 안내
+        String uspContent = !usp.isBlank() ? usp
+                : !roles.isBlank() ? roles
+                : "## 핵심 차별점 (USP)\n\n- 차별점 1:\n- 차별점 2:\n- 차별점 3:\n\n## 경쟁사 대비 우위\n\n- \n\n## 우리만의 가치 제안\n\n- ";
+
+        createPageWithContent(token, planningPageId, "문제 정의 (Problem)", "🗂️", problemContent);
+        createPageWithContent(token, planningPageId, "솔루션 (Solution)", "👋", solutionContent);
+        createPageWithContent(token, planningPageId, "타겟 페르소나 (Target Persona)", "👤", personaContent);
+        createPageWithContent(token, planningPageId, "시장 / 경쟁사 분석 (Market & Competitor)", "📊", marketContent);
+        createPageWithContent(token, planningPageId, "우리의 차별점 (USP)", "⭐", uspContent);
 
         log.info("기획 하위 페이지 생성 완료");
     }
@@ -890,6 +913,29 @@ public class NotionService {
     private boolean isKeyMatch(AiResponseDto.TemplateDto template, String keyword) {
         return (template.key() != null && template.key().toLowerCase().contains(keyword.toLowerCase()))
                 || (template.title() != null && template.title().contains(keyword));
+    }
+
+    /**
+     * 페이지 키/제목에 따라 적절한 이모지 아이콘을 반환합니다.
+     */
+    private String resolvePageEmoji(AiResponseDto.TemplateDto template) {
+        String key   = template.key()   != null ? template.key().toLowerCase()   : "";
+        String title = template.title() != null ? template.title().toLowerCase() : "";
+
+        // 홈
+        if (key.contains("home") || key.contains("홈") || title.contains("home") || title.contains("홈")) return "🏠";
+        // 기획
+        if (key.contains("plan") || key.contains("기획")) return "💬";
+        // 개발
+        if (key.contains("dev") || key.contains("개발")) return "💻";
+        // DB
+        if (key.contains("db") || title.contains("db") || title.contains("데이터")) return "🗄️";
+        // 그라운드룰
+        if (key.contains("ground") || key.contains("rule") || title.contains("그라운드")) return "📋";
+        // 역할별 가이드
+        if (key.contains("role") || key.contains("guide") || title.contains("역할") || title.contains("가이드")) return "😀";
+        // 기본
+        return "📄";
     }
 
     /**
