@@ -10,6 +10,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.*;
@@ -161,25 +168,28 @@ public class NotionService {
 
         List<Map<String, Object>> blocks = new ArrayList<>();
 
-        // 기획/개발/DB 콜아웃
+        // 기획/개발/DB 콜아웃 (key: PLANNING, DEVELOPMENT, DB 등 / title: 기획, 개발, DB 등)
         List<Map<String, Object>> leftRichText = buildMentionListByTitleOrKey(
-                pageKeyToIdMap, keyToTitle, new String[]{"기획", "개발", "DB", "db", "plan", "dev"});
+                pageKeyToIdMap, keyToTitle,
+                new String[]{"기획", "개발", "DB", "db", "planning", "plan", "development", "dev"});
         if (!leftRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(leftRichText, "📂", "gray_background"));
         } else {
             log.warn("[NavCallout] 기획/개발/DB 매칭 실패 - 키 목록: {}", pageKeyToIdMap.keySet());
         }
 
-        // 그라운드룰 콜아웃
+        // 그라운드룰 콜아웃 (key: GROUND_RULES 등 / title: 그라운드룰 등)
         List<Map<String, Object>> groundRuleRichText = buildMentionListByTitleOrKey(
-                pageKeyToIdMap, keyToTitle, new String[]{"그라운드룰", "groundrule", "ground", "rule"});
+                pageKeyToIdMap, keyToTitle,
+                new String[]{"그라운드룰", "ground_rules", "groundrule", "ground", "rule"});
         if (!groundRuleRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(groundRuleRichText, "🔗", "gray_background"));
         }
 
-        // 역할별 가이드 콜아웃
+        // 역할별 가이드 콜아웃 (key: ROLE_GUIDE 등 / title: 역할별 가이드 등)
         List<Map<String, Object>> roleGuideRichText = buildMentionListByTitleOrKey(
-                pageKeyToIdMap, keyToTitle, new String[]{"역할별", "가이드", "role", "guide"});
+                pageKeyToIdMap, keyToTitle,
+                new String[]{"역할별", "가이드", "role_guide", "role", "guide"});
         if (!roleGuideRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(roleGuideRichText, "😀", "gray_background"));
         }
@@ -189,17 +199,29 @@ public class NotionService {
             return;
         }
 
-        Map<String, Object> body = Map.of("children", blocks);
         try {
-            restTemplate.exchange(
-                    "https://api.notion.com/v1/blocks/" + rootPageId + "/children",
-                    org.springframework.http.HttpMethod.PATCH,
-                    new HttpEntity<>(body, createNotionHeaders(token)),
-                    Map.class
-            );
-            log.info("[NavCallout] 루트 페이지에 네비게이션 콜아웃 블록 추가 완료");
-        } catch (RestClientResponseException e) {
-            log.error("[NavCallout] append 실패 status={} body={}", e.getStatusCode(), summarizeResponseBody(e.getResponseBodyAsString()));
+            ObjectMapper objectMapper = new ObjectMapper();
+            String jsonBody = objectMapper.writeValueAsString(Map.of("children", blocks));
+
+            HttpClient httpClient = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.notion.com/v1/blocks/" + rootPageId + "/children"))
+                    .method("PATCH", HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .header("Authorization", "Bearer " + token)
+                    .header("Notion-Version", "2022-06-28")
+                    .header("Content-Type", "application/json")
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                log.info("[NavCallout] 루트 페이지에 네비게이션 콜아웃 블록 추가 완료 (status={})", response.statusCode());
+            } else {
+                log.error("[NavCallout] append 실패 status={} body={}", response.statusCode(), summarizeResponseBody(response.body()));
+                throw new RuntimeException("nav callout append failed: " + response.statusCode());
+            }
+        } catch (IOException | InterruptedException e) {
+            log.error("[NavCallout] append 요청 중 오류: {}", e.getMessage());
             throw new RuntimeException("nav callout append failed", e);
         }
     }

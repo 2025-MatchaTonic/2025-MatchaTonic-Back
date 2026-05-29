@@ -47,6 +47,9 @@ dependencies {
 	// WebSocket
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 
+	// Apache HttpClient5 (RestTemplate PATCH 지원)
+	implementation 'org.apache.httpcomponents.client5:httpclient5'
+
 }
 
 tasks.named('test') {
