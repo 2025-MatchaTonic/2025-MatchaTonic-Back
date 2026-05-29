@@ -120,8 +120,8 @@ public class ProjectController {
         ExportRequestDto finalDto = exportRequestDto.withProjectId(projectId).withNotionToken(notionToken);
 
         try {
-            aiService.exportOnly(finalDto);
-            return ResponseEntity.ok("노션 내보내기가 성공적으로 완료되었습니다.");
+            aiService.exportOnly(finalDto);  // 비동기 실행 - 즉시 반환
+            return ResponseEntity.accepted().body("노션 내보내기를 시작했습니다. 잠시 후 노션에서 확인해주세요.");
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (Exception e) {

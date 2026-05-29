@@ -7,6 +7,7 @@ import com.example.MatchaTonic.Back.repository.project.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -46,7 +47,8 @@ public class AiService {
         }
     }
 
-    // AI 분석 결과 생성 및 노션으로 내보내는 메서드
+    // AI 분석 결과 생성 및 노션으로 내보내는 메서드 (비동기 - 프론트 타임아웃 방지)
+    @Async("notionExportExecutor")
     public void exportOnly(ExportRequestDto request) {
         Project project = projectRepository.findById(request.projectId())
                 .orElseThrow(() -> new RuntimeException("프로젝트를 찾을 수 없습니다. ID: " + request.projectId()));
