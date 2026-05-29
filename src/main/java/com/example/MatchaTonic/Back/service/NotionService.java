@@ -74,7 +74,7 @@ public class NotionService {
      * @param userToken 사용자가 직접 입력한 노션 통합 토큰
      * @param pageUrl 사용자가 직접 입력한 부모 페이지 URL
      */
-    public void createProjectPagesOnNotion(AiResponseDto aiResponse, String userToken, String pageUrl, String projectSubject, String projectSummary, List<MemberDto.InfoResponse> members) {
+    public void createProjectPagesOnNotion(AiResponseDto aiResponse, String userToken, String pageUrl, String projectSubject, String projectSummary, List<MemberDto.InfoResponse> members, Map<String, Object> collectedData) {
         if (aiResponse == null || aiResponse.templates() == null) {
             log.error("AI 응답 데이터가 비어있어 노션 생성을 중단합니다.");
             throw new IllegalArgumentException("AI가 생성한 노션 템플릿 데이터가 없습니다.");
@@ -118,9 +118,9 @@ public class NotionService {
                         rootCreatedPageId = createdPageId;
                         createDashboardDatabases(userToken, createdPageId);
                     } else if (isKeyMatch(template, "기획") || isKeyMatch(template, "PLANNING")) {
-                        createPlanningSubPages(userToken, createdPageId);
+                        createPlanningSubPages(userToken, createdPageId, collectedData);
                     } else if (isKeyMatch(template, "개발") || isKeyMatch(template, "DEVELOPMENT")) {
-                        createDevelopmentSubPages(userToken, createdPageId);
+                        createDevelopmentSubPages(userToken, createdPageId, collectedData);
                     } else if (isKeyMatch(template, "DB") || isKeyMatch(template, "db")) {
                         createDbSchemaDatabase(userToken, createdPageId);
                     }
@@ -388,50 +388,103 @@ public class NotionService {
     }
 
     /**
-     * 기획 페이지 안에 고정 하위 페이지들을 생성합니다.
+     * 기획 페이지 안에 고정 하위 페이지들을 DB 데이터로 채워 생성합니다.
      */
-    private void createPlanningSubPages(String token, String planningPageId) {
-        List<Map<String, Object>> subPages = List.of(
-                Map.of("title", "문제 정의 (Problem)",             "emoji", "🗂️"),
-                Map.of("title", "솔루션 (Solution)",               "emoji", "👋"),
-                Map.of("title", "타겟 페르소나 (Target Persona)",   "emoji", "👤"),
-                Map.of("title", "시장 / 경쟁사 분석 (Market & Competitor)", "emoji", "📊"),
-                Map.of("title", "우리의 차별점 (USP)",              "emoji", "⭐")
-        );
-        for (Map<String, Object> page : subPages) {
-            createSimplePage(token, planningPageId, (String) page.get("title"), (String) page.get("emoji"));
-        }
+    private void createPlanningSubPages(String token, String planningPageId, Map<String, Object> data) {
+        String subject  = asStringFromData(data, "subject", "");
+        String goal     = asStringFromData(data, "goal", "");
+        String roles    = asStringFromData(data, "roles", "");
+        String problem  = asStringFromData(data, "problem", asStringFromData(data, "문제", ""));
+        String solution = asStringFromData(data, "solution", asStringFromData(data, "솔루션", ""));
+        String persona  = asStringFromData(data, "targetPersona", asStringFromData(data, "persona", asStringFromData(data, "페르소나", "")));
+        String market   = asStringFromData(data, "market", asStringFromData(data, "marketAnalysis", asStringFromData(data, "시장", "")));
+        String usp      = asStringFromData(data, "usp", asStringFromData(data, "differentiator", asStringFromData(data, "차별점", "")));
+
+        createPageWithContent(token, planningPageId, "문제 정의 (Problem)", "🗂️",
+                problem.isBlank() ? (subject.isBlank() ? null : subject) : problem);
+
+        createPageWithContent(token, planningPageId, "솔루션 (Solution)", "👋",
+                solution.isBlank() ? (goal.isBlank() ? null : goal) : solution);
+
+        createPageWithContent(token, planningPageId, "타겟 페르소나 (Target Persona)", "👤",
+                persona.isBlank() ? null : persona);
+
+        createPageWithContent(token, planningPageId, "시장 / 경쟁사 분석 (Market & Competitor)", "📊",
+                market.isBlank() ? null : market);
+
+        createPageWithContent(token, planningPageId, "우리의 차별점 (USP)", "⭐",
+                usp.isBlank() ? (roles.isBlank() ? null : roles) : usp);
+
         log.info("기획 하위 페이지 생성 완료");
     }
 
     /**
      * 개발 페이지 안에 고정 하위 페이지들을 생성합니다.
      */
-    private void createDevelopmentSubPages(String token, String developmentPageId) {
-        List<Map<String, Object>> subPages = List.of(
-                Map.of("title", "README.md",                        "emoji", "📄"),
-                Map.of("title", "Git Convention",                   "emoji", "📄"),
-                Map.of("title", "PR(Pull Request) Template",        "emoji", "📄"),
-                Map.of("title", "버전 관리 정책 (Versioning)",       "emoji", "📄"),
-                Map.of("title", "Backend",                          "emoji", "📄"),
-                Map.of("title", "Frontend",                         "emoji", "📄")
-        );
-        for (Map<String, Object> page : subPages) {
-            createSimplePage(token, developmentPageId, (String) page.get("title"), (String) page.get("emoji"));
-        }
+    private void createDevelopmentSubPages(String token, String developmentPageId, Map<String, Object> data) {
+        String projectName  = asStringFromData(data, "projectName", asStringFromData(data, "title", "프로젝트"));
+        String subject      = asStringFromData(data, "subject", "");
+        String goal         = asStringFromData(data, "goal", "");
+        String deliverables = asStringFromData(data, "deliverables", "");
+        String dueDate      = asStringFromData(data, "dueDate", "");
+
+        // README.md
+        String readmeContent = "## " + projectName + "\n\n"
+                + (subject.isBlank() ? "" : "### 프로젝트 개요\n" + subject + "\n\n")
+                + (goal.isBlank() ? "" : "### 목표\n" + goal + "\n\n")
+                + (deliverables.isBlank() ? "" : "### 주요 산출물\n" + deliverables + "\n\n")
+                + (dueDate.isBlank() ? "" : "### 마감일\n" + dueDate);
+        createPageWithContent(token, developmentPageId, "README.md", "📄", readmeContent);
+
+        // Git Convention (고정 내용)
+        createPageWithContent(token, developmentPageId, "Git Convention", "📄",
+                "## 브랜치 전략\n- main: 배포 브랜치\n- develop: 개발 통합 브랜치\n- feature/{기능명}: 기능 개발\n- fix/{버그명}: 버그 수정\n\n"
+                + "## 커밋 메시지 규칙\n- feat: 새로운 기능\n- fix: 버그 수정\n- docs: 문서 수정\n- style: 코드 포맷\n- refactor: 리팩토링\n- test: 테스트\n- chore: 빌드/설정 변경");
+
+        // PR Template (고정 내용)
+        createPageWithContent(token, developmentPageId, "PR(Pull Request) Template", "📄",
+                "## 변경 사항\n- \n\n## 관련 이슈\n- closes #\n\n## 테스트 항목\n- [ ] \n\n## 리뷰어에게\n");
+
+        // 버전 관리 정책 (고정 내용)
+        createPageWithContent(token, developmentPageId, "버전 관리 정책 (Versioning)", "📄",
+                "## 버전 형식\n`Major.Minor.Patch` (예: 1.0.0)\n\n- Major: 하위 호환 불가 변경\n- Minor: 하위 호환 기능 추가\n- Patch: 버그 수정");
+
+        // Backend / Frontend (빈 페이지)
+        createPageWithContent(token, developmentPageId, "Backend",  "📄", null);
+        createPageWithContent(token, developmentPageId, "Frontend", "📄", null);
+
         log.info("개발 하위 페이지 생성 완료");
     }
 
     /**
-     * 아이콘이 있는 단순 하위 페이지를 생성합니다.
+     * 아이콘과 내용이 있는 하위 페이지를 생성합니다. content가 null이면 빈 페이지.
      */
-    private void createSimplePage(String token, String parentId, String title, String emoji) {
+    private void createPageWithContent(String token, String parentId, String title, String emoji, String content) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("parent", Map.of("page_id", parentId));
         body.put("icon", Map.of("type", "emoji", "emoji", emoji));
         body.put("properties", Map.of(
                 "title", Map.of("title", List.of(Map.of("text", Map.of("content", title))))
         ));
+        if (content != null && !content.isBlank()) {
+            List<Map<String, Object>> children = new ArrayList<>();
+            for (String line : content.split("\n")) {
+                if (line.startsWith("## ")) {
+                    children.add(Map.of("object", "block", "type", "heading_2",
+                            "heading_2", Map.of("rich_text", List.of(textObject(line.substring(3))))));
+                } else if (line.startsWith("### ")) {
+                    children.add(Map.of("object", "block", "type", "heading_3",
+                            "heading_3", Map.of("rich_text", List.of(textObject(line.substring(4))))));
+                } else if (line.startsWith("- ")) {
+                    children.add(createBulletBlock(line.substring(2)));
+                } else if (line.startsWith("- [ ] ")) {
+                    children.add(createBulletBlock("☐ " + line.substring(6)));
+                } else if (!line.isBlank()) {
+                    children.add(createParagraphBlock(line));
+                }
+            }
+            if (!children.isEmpty()) body.put("children", children);
+        }
         try {
             restTemplate.postForEntity(
                     "https://api.notion.com/v1/pages",
@@ -441,6 +494,13 @@ public class NotionService {
         } catch (RestClientResponseException e) {
             log.error("하위 페이지 생성 실패 title={} status={}", title, e.getStatusCode());
         }
+    }
+
+    private String asStringFromData(Map<String, Object> data, String key, String defaultValue) {
+        if (data == null) return defaultValue;
+        Object val = data.get(key);
+        if (val == null || val.toString().isBlank()) return defaultValue;
+        return val.toString().trim();
     }
 
     /**

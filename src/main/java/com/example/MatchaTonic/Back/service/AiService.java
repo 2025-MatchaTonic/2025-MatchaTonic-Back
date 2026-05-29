@@ -58,13 +58,15 @@ public class AiService {
             log.info("FastAPI 분석 및 노션 내보내기 - ProjectID: {}", request.projectId());
             aiResponse = restTemplate.postForObject(fastApiUrl, aiRequestPayload, AiResponseDto.class);
 
+            Map<String, Object> collectedData = projectService.buildCollectedData(project);
             notionService.createProjectPagesOnNotion(
                     aiResponse,
                     request.notionToken(),
                     request.pageUrl(),
                     project.getSubject(),
                     project.getSessionSummaryText(),
-                    projectService.getProjectMembers(project.getId()).getMembers()
+                    projectService.getProjectMembers(project.getId()).getMembers(),
+                    collectedData
             );
         } catch (IllegalArgumentException e) {
             throw e;
