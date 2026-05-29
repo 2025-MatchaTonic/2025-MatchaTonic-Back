@@ -101,10 +101,26 @@ public class NotionService {
         List<String> failedKeys = new ArrayList<>();
         List<String> failedDetails = new ArrayList<>();
         int createdCount = 0;
-        String rootCreatedPageId = null; // 루트 페이지 ID 저장
+        String rootCreatedPageId = null;   // 홈 페이지 ID (딱 한 번만 설정)
+        Set<String> rootLevelKeys = new HashSet<>(); // nav 콜아웃에 표시할 직계 자식 키
+
+        // 구조적 부모 키 모음 (기획/개발 하위 AI 템플릿 skip 용)
+        Set<String> structuralParentKeys = new HashSet<>();
+        for (AiResponseDto.TemplateDto t : aiResponse.templates()) {
+            if (isKeyMatch(t, "기획") || isKeyMatch(t, "PLANNING")
+                    || isKeyMatch(t, "개발") || isKeyMatch(t, "DEVELOPMENT")) {
+                structuralParentKeys.add(t.key());
+            }
+        }
 
         for (AiResponseDto.TemplateDto template : aiResponse.templates()) {
             try {
+                // ① 기획/개발의 AI 하위 템플릿은 우리가 직접 만들므로 SKIP
+                if (template.parentKey() != null && structuralParentKeys.contains(template.parentKey())) {
+                    log.info("구조적 페이지 하위 AI 템플릿 skip: key={}", template.key());
+                    continue;
+                }
+
                 String parentId = (template.parentKey() == null)
                         ? rootParentPageId
                         : pageKeyToIdMap.get(template.parentKey());
@@ -117,9 +133,17 @@ public class NotionService {
                 String createdPageId = callNotionApi(userToken, parentId, template, projectSubject, projectSummary, members);
                 if (createdPageId != null) {
                     pageKeyToIdMap.put(template.key(), createdPageId);
+
                     if (template.parentKey() == null) {
-                        rootCreatedPageId = createdPageId;
-                        createDashboardDatabases(userToken, createdPageId);
+                        // ② 홈 페이지(Project Home)만 회의록/일정 DB 생성, rootCreatedPageId 설정
+                        if (rootCreatedPageId == null && isRootHomePage(template)) {
+                            rootCreatedPageId = createdPageId;
+                            createDashboardDatabases(userToken, createdPageId);
+                        }
+                        // nav 콜아웃 대상 (직계 자식)에 추가 — 홈 페이지 자신은 제외
+                        if (!isRootHomePage(template)) {
+                            rootLevelKeys.add(template.key());
+                        }
                     } else if (isKeyMatch(template, "기획") || isKeyMatch(template, "PLANNING")) {
                         createPlanningSubPages(userToken, createdPageId, collectedData);
                     } else if (isKeyMatch(template, "개발") || isKeyMatch(template, "DEVELOPMENT")) {
@@ -142,7 +166,7 @@ public class NotionService {
         log.info("생성된 페이지 키 목록: {}", pageKeyToIdMap.keySet());
         if (rootCreatedPageId != null) {
             try {
-                appendNavCalloutsToRootPage(userToken, rootCreatedPageId, pageKeyToIdMap, aiResponse.templates());
+                appendNavCalloutsToRootPage(userToken, rootCreatedPageId, pageKeyToIdMap, aiResponse.templates(), rootLevelKeys);
             } catch (Exception e) {
                 log.warn("네비게이션 콜아웃 추가 실패: {}", e.getMessage());
             }
@@ -165,7 +189,18 @@ public class NotionService {
      * templates 리스트로 key뿐 아니라 title까지 매칭합니다.
      */
     private void appendNavCalloutsToRootPage(String token, String rootPageId,
-            Map<String, String> pageKeyToIdMap, List<AiResponseDto.TemplateDto> templates) {
+            Map<String, String> pageKeyToIdMap, List<AiResponseDto.TemplateDto> templates,
+            Set<String> rootLevelKeys) {
+
+        // rootLevelKeys로 필터: 홈 직계 자식만 nav에 표시
+        Map<String, String> filteredMap = new HashMap<>();
+        for (Map.Entry<String, String> e : pageKeyToIdMap.entrySet()) {
+            if (rootLevelKeys.contains(e.getKey())) {
+                filteredMap.put(e.getKey(), e.getValue());
+            }
+        }
+        log.info("[NavCallout] rootLevelKeys: {}", rootLevelKeys);
+        log.info("[NavCallout] filteredMap keys: {}", filteredMap.keySet());
 
         // key -> title 역방향 맵 구성 (매칭 편의용)
         Map<String, String> keyToTitle = new HashMap<>();
@@ -179,27 +214,27 @@ public class NotionService {
 
         List<Map<String, Object>> blocks = new ArrayList<>();
 
-        // 기획/개발/DB 콜아웃 (key: PLANNING, DEVELOPMENT, DB 등 / title: 기획, 개발, DB 등)
+        // 기획/개발/DB 콜아웃 (직계 자식 중에서만)
         List<Map<String, Object>> leftRichText = buildMentionListByTitleOrKey(
-                pageKeyToIdMap, keyToTitle,
+                filteredMap, keyToTitle,
                 new String[]{"기획", "개발", "DB", "db", "planning", "plan", "development", "dev"});
         if (!leftRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(leftRichText, "📂", "gray_background"));
         } else {
-            log.warn("[NavCallout] 기획/개발/DB 매칭 실패 - 키 목록: {}", pageKeyToIdMap.keySet());
+            log.warn("[NavCallout] 기획/개발/DB 매칭 실패 - 키 목록: {}", filteredMap.keySet());
         }
 
-        // 그라운드룰 콜아웃 (key: GROUND_RULES 등 / title: 그라운드룰 등)
+        // 그라운드룰 콜아웃 (직계 자식 중에서만)
         List<Map<String, Object>> groundRuleRichText = buildMentionListByTitleOrKey(
-                pageKeyToIdMap, keyToTitle,
+                filteredMap, keyToTitle,
                 new String[]{"그라운드룰", "ground_rules", "groundrule", "ground", "rule"});
         if (!groundRuleRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(groundRuleRichText, "🔗", "gray_background"));
         }
 
-        // 역할별 가이드 콜아웃 (key: ROLE_GUIDE 등 / title: 역할별 가이드 등)
+        // 역할별 가이드 콜아웃 (직계 자식 중에서만)
         List<Map<String, Object>> roleGuideRichText = buildMentionListByTitleOrKey(
-                pageKeyToIdMap, keyToTitle,
+                filteredMap, keyToTitle,
                 new String[]{"역할별", "가이드", "role_guide", "role", "guide"});
         if (!roleGuideRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(roleGuideRichText, "😀", "gray_background"));
@@ -855,6 +890,17 @@ public class NotionService {
     private boolean isKeyMatch(AiResponseDto.TemplateDto template, String keyword) {
         return (template.key() != null && template.key().toLowerCase().contains(keyword.toLowerCase()))
                 || (template.title() != null && template.title().contains(keyword));
+    }
+
+    /**
+     * PROJECT_HOME / home / 홈 등 홈 페이지 여부 판별.
+     * parentKey == null인 템플릿 중 key 또는 title에 "home", "HOME", "홈" 이 포함된 경우를 홈으로 본다.
+     */
+    private boolean isRootHomePage(AiResponseDto.TemplateDto template) {
+        String key   = template.key()   != null ? template.key().toLowerCase()   : "";
+        String title = template.title() != null ? template.title().toLowerCase() : "";
+        return key.contains("home") || key.contains("홈") || key.contains("project_home")
+                || title.contains("home") || title.contains("홈") || title.contains("project home");
     }
 
     private boolean isStructuralPage(AiResponseDto.TemplateDto template) {
