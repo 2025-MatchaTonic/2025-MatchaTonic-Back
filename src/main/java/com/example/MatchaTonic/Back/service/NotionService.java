@@ -117,6 +117,12 @@ public class NotionService {
                     if (template.parentKey() == null) {
                         rootCreatedPageId = createdPageId;
                         createDashboardDatabases(userToken, createdPageId);
+                    } else if (isKeyMatch(template, "기획") || isKeyMatch(template, "PLANNING")) {
+                        createPlanningSubPages(userToken, createdPageId);
+                    } else if (isKeyMatch(template, "개발") || isKeyMatch(template, "DEVELOPMENT")) {
+                        createDevelopmentSubPages(userToken, createdPageId);
+                    } else if (isKeyMatch(template, "DB") || isKeyMatch(template, "db")) {
+                        createDbSchemaDatabase(userToken, createdPageId);
                     }
                     createdCount++;
                 }
@@ -381,6 +387,101 @@ public class NotionService {
         ));
     }
 
+    /**
+     * 기획 페이지 안에 고정 하위 페이지들을 생성합니다.
+     */
+    private void createPlanningSubPages(String token, String planningPageId) {
+        List<Map<String, Object>> subPages = List.of(
+                Map.of("title", "문제 정의 (Problem)",             "emoji", "🗂️"),
+                Map.of("title", "솔루션 (Solution)",               "emoji", "👋"),
+                Map.of("title", "타겟 페르소나 (Target Persona)",   "emoji", "👤"),
+                Map.of("title", "시장 / 경쟁사 분석 (Market & Competitor)", "emoji", "📊"),
+                Map.of("title", "우리의 차별점 (USP)",              "emoji", "⭐")
+        );
+        for (Map<String, Object> page : subPages) {
+            createSimplePage(token, planningPageId, (String) page.get("title"), (String) page.get("emoji"));
+        }
+        log.info("기획 하위 페이지 생성 완료");
+    }
+
+    /**
+     * 개발 페이지 안에 고정 하위 페이지들을 생성합니다.
+     */
+    private void createDevelopmentSubPages(String token, String developmentPageId) {
+        List<Map<String, Object>> subPages = List.of(
+                Map.of("title", "README.md",                        "emoji", "📄"),
+                Map.of("title", "Git Convention",                   "emoji", "📄"),
+                Map.of("title", "PR(Pull Request) Template",        "emoji", "📄"),
+                Map.of("title", "버전 관리 정책 (Versioning)",       "emoji", "📄"),
+                Map.of("title", "Backend",                          "emoji", "📄"),
+                Map.of("title", "Frontend",                         "emoji", "📄")
+        );
+        for (Map<String, Object> page : subPages) {
+            createSimplePage(token, developmentPageId, (String) page.get("title"), (String) page.get("emoji"));
+        }
+        log.info("개발 하위 페이지 생성 완료");
+    }
+
+    /**
+     * 아이콘이 있는 단순 하위 페이지를 생성합니다.
+     */
+    private void createSimplePage(String token, String parentId, String title, String emoji) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("parent", Map.of("page_id", parentId));
+        body.put("icon", Map.of("type", "emoji", "emoji", emoji));
+        body.put("properties", Map.of(
+                "title", Map.of("title", List.of(Map.of("text", Map.of("content", title))))
+        ));
+        try {
+            restTemplate.postForEntity(
+                    "https://api.notion.com/v1/pages",
+                    new HttpEntity<>(body, createNotionHeaders(token)),
+                    Map.class
+            );
+        } catch (RestClientResponseException e) {
+            log.error("하위 페이지 생성 실패 title={} status={}", title, e.getStatusCode());
+        }
+    }
+
+    /**
+     * DB 페이지 안에 테이블 명세 데이터베이스를 생성합니다.
+     */
+    private void createDbSchemaDatabase(String token, String dbPageId) {
+        String schemaDbId = createDatabase(token, dbPageId, "테이블 명세", Map.of(
+                "테이블명", Map.of("title", Map.of()),
+                "컬럼명", Map.of("rich_text", Map.of()),
+                "데이터 타입", Map.of("select", Map.of("options", List.of(
+                        selectOption("VARCHAR", "blue"),
+                        selectOption("INT", "green"),
+                        selectOption("BIGINT", "purple"),
+                        selectOption("TEXT", "yellow"),
+                        selectOption("BOOLEAN", "orange"),
+                        selectOption("DATETIME", "red"),
+                        selectOption("DATE", "pink"),
+                        selectOption("FLOAT", "gray")
+                ))),
+                "NULL 여부", Map.of("select", Map.of("options", List.of(
+                        selectOption("NOT NULL", "red"),
+                        selectOption("NULL", "gray")
+                ))),
+                "설명", Map.of("rich_text", Map.of())
+        ));
+        log.info("DB 테이블 명세 데이터베이스 생성 완료: {}", schemaDbId);
+
+        String erDbId = createDatabase(token, dbPageId, "ERD 관계 정의", Map.of(
+                "관계명", Map.of("title", Map.of()),
+                "테이블 A", Map.of("rich_text", Map.of()),
+                "테이블 B", Map.of("rich_text", Map.of()),
+                "관계 유형", Map.of("select", Map.of("options", List.of(
+                        selectOption("1:1", "blue"),
+                        selectOption("1:N", "green"),
+                        selectOption("N:M", "purple")
+                ))),
+                "설명", Map.of("rich_text", Map.of())
+        ));
+        log.info("ERD 관계 정의 데이터베이스 생성 완료: {}", erDbId);
+    }
+
     private String createDatabase(String token, String parentPageId, String title, Map<String, Object> properties) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("parent", Map.of("type", "page_id", "page_id", parentPageId));
@@ -466,18 +567,28 @@ public class NotionService {
             addPlanningPageIntroBlocks(blocks, projectSummary);
         } else if (isKeyMatch(template, "개발")) {
             addDevPageIntroBlocks(blocks);
+        } else if (isKeyMatch(template, "역할별") || isKeyMatch(template, "ROLE_GUIDE") || isKeyMatch(template, "role_guide") || isKeyMatch(template, "가이드")) {
+            addRoleGuideIntroBlocks(blocks, members);
+        } else if (isKeyMatch(template, "DB") || isKeyMatch(template, "db")) {
+            addDbPageIntroBlocks(blocks);
         }
     }
 
     private boolean isKeyMatch(AiResponseDto.TemplateDto template, String keyword) {
-        return (template.key() != null && template.key().contains(keyword))
+        return (template.key() != null && template.key().toLowerCase().contains(keyword.toLowerCase()))
                 || (template.title() != null && template.title().contains(keyword));
     }
 
     private boolean isStructuralPage(AiResponseDto.TemplateDto template) {
         return template.parentKey() == null
                 || isKeyMatch(template, "기획")
-                || isKeyMatch(template, "개발");
+                || isKeyMatch(template, "개발")
+                || isKeyMatch(template, "역할별")
+                || isKeyMatch(template, "ROLE_GUIDE")
+                || isKeyMatch(template, "role_guide")
+                || isKeyMatch(template, "가이드")
+                || isKeyMatch(template, "DB")
+                || isKeyMatch(template, "db");
     }
 
     private void addRootPageIntroBlocks(List<Map<String, Object>> blocks, String projectSummary, List<MemberDto.InfoResponse> members) {
@@ -502,6 +613,55 @@ public class NotionService {
     private void addDevPageIntroBlocks(List<Map<String, Object>> blocks) {
         blocks.add(createCalloutBlock("메뉴얼", "💡", "yellow_background"));
         blocks.add(createCalloutBlock("Backend\nFrontend", "⌨️", "gray_background"));
+    }
+
+    private void addDbPageIntroBlocks(List<Map<String, Object>> blocks) {
+        blocks.add(createCalloutBlock("테이블 명세 및 ERD 관계 정의 데이터베이스는 아래에 자동 생성됩니다.", "🗄️", "gray_background"));
+    }
+
+    private void addRoleGuideIntroBlocks(List<Map<String, Object>> blocks, List<MemberDto.InfoResponse> members) {
+        blocks.add(createCalloutBlock("각 역할별 업무 가이드입니다.", "😀", "gray_background"));
+        blocks.add(createDividerBlock());
+
+        Map<String, String> roleGuideMap = Map.of(
+                "BACKEND",   "• API 설계 및 개발\n• 데이터베이스 설계 및 관리\n• 서버 배포 및 운영\n• 프론트엔드와 API 명세 공유",
+                "백엔드",     "• API 설계 및 개발\n• 데이터베이스 설계 및 관리\n• 서버 배포 및 운영\n• 프론트엔드와 API 명세 공유",
+                "FRONTEND",  "• UI/UX 구현\n• 백엔드 API 연동\n• 컴포넌트 설계 및 재사용성 관리\n• 반응형 디자인 적용",
+                "프론트엔드", "• UI/UX 구현\n• 백엔드 API 연동\n• 컴포넌트 설계 및 재사용성 관리\n• 반응형 디자인 적용",
+                "AI",        "• AI 모델 설계 및 학습\n• 데이터 전처리 및 분석\n• 모델 성능 평가 및 개선\n• 백엔드와 AI API 연동",
+                "LEADER",    "• 프로젝트 전체 일정 관리\n• 팀원 역할 분배 및 조율\n• 회의 진행 및 의사결정\n• 최종 산출물 검토"
+        );
+
+        Set<String> addedRoles = new HashSet<>();
+        if (members != null) {
+            for (MemberDto.InfoResponse member : members) {
+                String role = member.getRole();
+                if (role == null || addedRoles.contains(role.toUpperCase())) continue;
+                addedRoles.add(role.toUpperCase());
+
+                String guideContent = roleGuideMap.entrySet().stream()
+                        .filter(e -> role.toUpperCase().contains(e.getKey().toUpperCase())
+                                || e.getKey().toUpperCase().contains(role.toUpperCase()))
+                        .map(Map.Entry::getValue)
+                        .findFirst()
+                        .orElse("• 역할에 맞는 업무를 수행합니다.\n• 팀원과 적극적으로 소통합니다.");
+
+                blocks.add(createHeadingBlock(role + " 가이드"));
+                blocks.add(createParagraphBlock(guideContent));
+                blocks.add(createDividerBlock());
+            }
+        }
+
+        // 팀원 정보가 없으면 기본 가이드 제공
+        if (addedRoles.isEmpty()) {
+            for (Map.Entry<String, String> entry : roleGuideMap.entrySet()) {
+                if (List.of("BACKEND", "FRONTEND", "AI", "LEADER").contains(entry.getKey())) {
+                    blocks.add(createHeadingBlock(entry.getKey() + " 가이드"));
+                    blocks.add(createParagraphBlock(entry.getValue()));
+                    blocks.add(createDividerBlock());
+                }
+            }
+        }
     }
 
     private String extractSummaryLine(Object content) {
