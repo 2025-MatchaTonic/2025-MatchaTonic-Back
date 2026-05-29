@@ -165,7 +165,9 @@ public class NotionService {
 
         List<Map<String, Object>> children = new ArrayList<>();
         addDashboardIntroBlocks(template, children, projectSubject, projectSummary, members);
-        parseContentToBlocks(template.content(), children);
+        if (!isStructuralPage(template)) {
+            parseContentToBlocks(template.content(), children);
+        }
 
         if (!children.isEmpty()) {
             body.put("children", children);
@@ -328,6 +330,12 @@ public class NotionService {
     private boolean isKeyMatch(AiResponseDto.TemplateDto template, String keyword) {
         return (template.key() != null && template.key().contains(keyword))
                 || (template.title() != null && template.title().contains(keyword));
+    }
+
+    private boolean isStructuralPage(AiResponseDto.TemplateDto template) {
+        return template.parentKey() == null
+                || isKeyMatch(template, "기획")
+                || isKeyMatch(template, "개발");
     }
 
     private void addRootPageIntroBlocks(List<Map<String, Object>> blocks, String projectSummary, List<MemberDto.InfoResponse> members) {
