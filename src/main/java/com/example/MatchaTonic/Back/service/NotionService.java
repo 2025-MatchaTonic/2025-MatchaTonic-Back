@@ -121,11 +121,12 @@ public class NotionService {
         }
 
         // 모든 페이지 생성 후 루트 페이지에 페이지 멘션 콜아웃 append
+        log.info("생성된 페이지 키 목록: {}", pageKeyToIdMap.keySet());
         if (rootCreatedPageId != null) {
             try {
-                appendNavCalloutsToRootPage(userToken, rootCreatedPageId, pageKeyToIdMap);
+                appendNavCalloutsToRootPage(userToken, rootCreatedPageId, pageKeyToIdMap, aiResponse.templates());
             } catch (Exception e) {
-                log.warn("네비게이션 콜아웃 추가 실패 (무시): {}", e.getMessage());
+                log.warn("네비게이션 콜아웃 추가 실패: {}", e.getMessage());
             }
         }
 
@@ -143,32 +144,50 @@ public class NotionService {
 
     /**
      * 모든 하위 페이지 생성 후, 루트 페이지에 페이지 멘션이 담긴 콜아웃 블록을 추가합니다.
+     * templates 리스트로 key뿐 아니라 title까지 매칭합니다.
      */
-    private void appendNavCalloutsToRootPage(String token, String rootPageId, Map<String, String> pageKeyToIdMap) {
+    private void appendNavCalloutsToRootPage(String token, String rootPageId,
+            Map<String, String> pageKeyToIdMap, List<AiResponseDto.TemplateDto> templates) {
+
+        // key -> title 역방향 맵 구성 (매칭 편의용)
+        Map<String, String> keyToTitle = new HashMap<>();
+        for (AiResponseDto.TemplateDto t : templates) {
+            if (t.key() != null && t.title() != null) {
+                keyToTitle.put(t.key(), t.title());
+            }
+        }
+        log.info("[NavCallout] pageKeyToIdMap keys: {}", pageKeyToIdMap.keySet());
+        log.info("[NavCallout] keyToTitle: {}", keyToTitle);
+
         List<Map<String, Object>> blocks = new ArrayList<>();
 
         // 기획/개발/DB 콜아웃
-        List<Map<String, Object>> leftRichText = buildMentionList(pageKeyToIdMap,
-                new String[]{"기획", "개발", "DB", "db"});
+        List<Map<String, Object>> leftRichText = buildMentionListByTitleOrKey(
+                pageKeyToIdMap, keyToTitle, new String[]{"기획", "개발", "DB", "db", "plan", "dev"});
         if (!leftRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(leftRichText, "📂", "gray_background"));
+        } else {
+            log.warn("[NavCallout] 기획/개발/DB 매칭 실패 - 키 목록: {}", pageKeyToIdMap.keySet());
         }
 
         // 그라운드룰 콜아웃
-        List<Map<String, Object>> groundRuleRichText = buildMentionList(pageKeyToIdMap,
-                new String[]{"그라운드룰", "groundrule", "ground"});
+        List<Map<String, Object>> groundRuleRichText = buildMentionListByTitleOrKey(
+                pageKeyToIdMap, keyToTitle, new String[]{"그라운드룰", "groundrule", "ground", "rule"});
         if (!groundRuleRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(groundRuleRichText, "🔗", "gray_background"));
         }
 
         // 역할별 가이드 콜아웃
-        List<Map<String, Object>> roleGuideRichText = buildMentionList(pageKeyToIdMap,
-                new String[]{"역할별", "가이드", "role"});
+        List<Map<String, Object>> roleGuideRichText = buildMentionListByTitleOrKey(
+                pageKeyToIdMap, keyToTitle, new String[]{"역할별", "가이드", "role", "guide"});
         if (!roleGuideRichText.isEmpty()) {
             blocks.add(createMentionCalloutBlock(roleGuideRichText, "😀", "gray_background"));
         }
 
-        if (blocks.isEmpty()) return;
+        if (blocks.isEmpty()) {
+            log.warn("[NavCallout] 추가할 콜아웃 블록이 없습니다. 매칭 실패.");
+            return;
+        }
 
         Map<String, Object> body = Map.of("children", blocks);
         try {
@@ -178,23 +197,34 @@ public class NotionService {
                     new HttpEntity<>(body, createNotionHeaders(token)),
                     Map.class
             );
-            log.info("루트 페이지에 네비게이션 콜아웃 블록 추가 완료");
+            log.info("[NavCallout] 루트 페이지에 네비게이션 콜아웃 블록 추가 완료");
         } catch (RestClientResponseException e) {
-            log.error("네비게이션 콜아웃 append 실패 status={} body={}", e.getStatusCode(), summarizeResponseBody(e.getResponseBodyAsString()));
+            log.error("[NavCallout] append 실패 status={} body={}", e.getStatusCode(), summarizeResponseBody(e.getResponseBodyAsString()));
             throw new RuntimeException("nav callout append failed", e);
         }
     }
 
     /**
-     * pageKeyToIdMap에서 키워드와 매칭되는 페이지들의 멘션 rich_text 리스트를 만듭니다.
-     * 여러 멘션 사이에는 줄바꿈 텍스트를 삽입합니다.
+     * key 또는 title에 키워드가 포함되는 페이지를 찾아 멘션 rich_text 리스트를 만듭니다.
      */
-    private List<Map<String, Object>> buildMentionList(Map<String, String> pageKeyToIdMap, String[] keywords) {
+    private List<Map<String, Object>> buildMentionListByTitleOrKey(
+            Map<String, String> pageKeyToIdMap,
+            Map<String, String> keyToTitle,
+            String[] keywords) {
+
         List<Map<String, Object>> richText = new ArrayList<>();
+        Set<String> addedKeys = new HashSet<>();
+
         for (String keyword : keywords) {
+            String lowerKw = keyword.toLowerCase();
             for (Map.Entry<String, String> entry : pageKeyToIdMap.entrySet()) {
-                String key = entry.getKey().toLowerCase();
-                if (key.contains(keyword.toLowerCase())) {
+                String mapKey = entry.getKey();
+                if (addedKeys.contains(mapKey)) continue;
+
+                String lowerKey = mapKey.toLowerCase();
+                String lowerTitle = keyToTitle.getOrDefault(mapKey, "").toLowerCase();
+
+                if (lowerKey.contains(lowerKw) || lowerTitle.contains(lowerKw)) {
                     if (!richText.isEmpty()) {
                         richText.add(Map.of("type", "text", "text", Map.of("content", "\n")));
                     }
@@ -202,6 +232,7 @@ public class NotionService {
                             "type", "mention",
                             "mention", Map.of("type", "page", "page", Map.of("id", entry.getValue()))
                     ));
+                    addedKeys.add(mapKey);
                     break;
                 }
             }
