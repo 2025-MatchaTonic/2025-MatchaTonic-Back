@@ -91,10 +91,10 @@ public class NotionService {
         List<String> failedKeys = new ArrayList<>();
         List<String> failedDetails = new ArrayList<>();
         int createdCount = 0;
+        String rootCreatedPageId = null; // 루트 페이지 ID 저장
 
         for (AiResponseDto.TemplateDto template : aiResponse.templates()) {
             try {
-                // 부모 ID 결정 (root 혹은 이전 단계에서 생성된 페이지 ID)
                 String parentId = (template.parentKey() == null)
                         ? rootParentPageId
                         : pageKeyToIdMap.get(template.parentKey());
@@ -104,11 +104,11 @@ public class NotionService {
                     parentId = rootParentPageId;
                 }
 
-                // 사용자가 전달한 토큰을 사용하여 호출
                 String createdPageId = callNotionApi(userToken, parentId, template, projectSubject, projectSummary, members);
                 if (createdPageId != null) {
                     pageKeyToIdMap.put(template.key(), createdPageId);
                     if (template.parentKey() == null) {
+                        rootCreatedPageId = createdPageId;
                         createDashboardDatabases(userToken, createdPageId);
                     }
                     createdCount++;
@@ -117,6 +117,15 @@ public class NotionService {
                 failedKeys.add(template.key());
                 failedDetails.add(template.key() + ": " + e.getMessage());
                 log.error("템플릿 생성 중 오류 발생 - Key: {}, Error: {}", template.key(), e.getMessage());
+            }
+        }
+
+        // 모든 페이지 생성 후 루트 페이지에 페이지 멘션 콜아웃 append
+        if (rootCreatedPageId != null) {
+            try {
+                appendNavCalloutsToRootPage(userToken, rootCreatedPageId, pageKeyToIdMap);
+            } catch (Exception e) {
+                log.warn("네비게이션 콜아웃 추가 실패 (무시): {}", e.getMessage());
             }
         }
 
@@ -130,6 +139,86 @@ public class NotionService {
         if (!failedKeys.isEmpty()) {
             throw new RuntimeException("일부 노션 페이지 생성에 실패했습니다: " + String.join(" / ", failedDetails));
         }
+    }
+
+    /**
+     * 모든 하위 페이지 생성 후, 루트 페이지에 페이지 멘션이 담긴 콜아웃 블록을 추가합니다.
+     */
+    private void appendNavCalloutsToRootPage(String token, String rootPageId, Map<String, String> pageKeyToIdMap) {
+        List<Map<String, Object>> blocks = new ArrayList<>();
+
+        // 기획/개발/DB 콜아웃
+        List<Map<String, Object>> leftRichText = buildMentionList(pageKeyToIdMap,
+                new String[]{"기획", "개발", "DB", "db"});
+        if (!leftRichText.isEmpty()) {
+            blocks.add(createMentionCalloutBlock(leftRichText, "📂", "gray_background"));
+        }
+
+        // 그라운드룰 콜아웃
+        List<Map<String, Object>> groundRuleRichText = buildMentionList(pageKeyToIdMap,
+                new String[]{"그라운드룰", "groundrule", "ground"});
+        if (!groundRuleRichText.isEmpty()) {
+            blocks.add(createMentionCalloutBlock(groundRuleRichText, "🔗", "gray_background"));
+        }
+
+        // 역할별 가이드 콜아웃
+        List<Map<String, Object>> roleGuideRichText = buildMentionList(pageKeyToIdMap,
+                new String[]{"역할별", "가이드", "role"});
+        if (!roleGuideRichText.isEmpty()) {
+            blocks.add(createMentionCalloutBlock(roleGuideRichText, "😀", "gray_background"));
+        }
+
+        if (blocks.isEmpty()) return;
+
+        Map<String, Object> body = Map.of("children", blocks);
+        try {
+            restTemplate.exchange(
+                    "https://api.notion.com/v1/blocks/" + rootPageId + "/children",
+                    org.springframework.http.HttpMethod.PATCH,
+                    new HttpEntity<>(body, createNotionHeaders(token)),
+                    Map.class
+            );
+            log.info("루트 페이지에 네비게이션 콜아웃 블록 추가 완료");
+        } catch (RestClientResponseException e) {
+            log.error("네비게이션 콜아웃 append 실패 status={} body={}", e.getStatusCode(), summarizeResponseBody(e.getResponseBodyAsString()));
+            throw new RuntimeException("nav callout append failed", e);
+        }
+    }
+
+    /**
+     * pageKeyToIdMap에서 키워드와 매칭되는 페이지들의 멘션 rich_text 리스트를 만듭니다.
+     * 여러 멘션 사이에는 줄바꿈 텍스트를 삽입합니다.
+     */
+    private List<Map<String, Object>> buildMentionList(Map<String, String> pageKeyToIdMap, String[] keywords) {
+        List<Map<String, Object>> richText = new ArrayList<>();
+        for (String keyword : keywords) {
+            for (Map.Entry<String, String> entry : pageKeyToIdMap.entrySet()) {
+                String key = entry.getKey().toLowerCase();
+                if (key.contains(keyword.toLowerCase())) {
+                    if (!richText.isEmpty()) {
+                        richText.add(Map.of("type", "text", "text", Map.of("content", "\n")));
+                    }
+                    richText.add(Map.of(
+                            "type", "mention",
+                            "mention", Map.of("type", "page", "page", Map.of("id", entry.getValue()))
+                    ));
+                    break;
+                }
+            }
+        }
+        return richText;
+    }
+
+    private Map<String, Object> createMentionCalloutBlock(List<Map<String, Object>> richText, String emoji, String color) {
+        return Map.of(
+                "object", "block",
+                "type", "callout",
+                "callout", Map.of(
+                        "rich_text", richText,
+                        "icon", Map.of("type", "emoji", "emoji", emoji),
+                        "color", color
+                )
+        );
     }
 
     /**
@@ -346,8 +435,8 @@ public class NotionService {
         blocks.add(createCalloutBlock(summaryBody, "📌", "gray_background"));
         blocks.add(createHeadingBlock("팀원 정보"));
         blocks.add(createTeamInfoTableBlock(members));
-        blocks.add(createCalloutBlock("💬 기획\n🖥️ 개발\n🔵 DB", "📂", "gray_background"));
-        blocks.add(createCalloutBlock("🔗 그라운드룰\n😀 역할별 가이드", "📎", "gray_background"));
+        // 기획/개발/DB, 그라운드룰/역할별 가이드 콜아웃은
+        // 하위 페이지 생성 후 page mention으로 appendNavCalloutsToRootPage에서 추가됩니다.
     }
 
     private void addPlanningPageIntroBlocks(List<Map<String, Object>> blocks, String projectSummary) {
