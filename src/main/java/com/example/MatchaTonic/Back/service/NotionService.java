@@ -106,12 +106,34 @@ public class NotionService {
 
         // 구조적 부모 키 모음 (기획/개발 하위 AI 템플릿 skip 용)
         Set<String> structuralParentKeys = new HashSet<>();
+        Set<String> planningParentKeys   = new HashSet<>(); // 기획 전용
         for (AiResponseDto.TemplateDto t : aiResponse.templates()) {
-            if (isKeyMatch(t, "기획") || isKeyMatch(t, "PLANNING")
-                    || isKeyMatch(t, "개발") || isKeyMatch(t, "DEVELOPMENT")) {
+            if (isKeyMatch(t, "기획") || isKeyMatch(t, "PLANNING")) {
+                structuralParentKeys.add(t.key());
+                planningParentKeys.add(t.key());
+            } else if (isKeyMatch(t, "개발") || isKeyMatch(t, "DEVELOPMENT")) {
                 structuralParentKeys.add(t.key());
             }
         }
+
+        // AI가 채팅으로 채운 기획 하위 콘텐츠를 collectedData에 병합
+        Map<String, Object> mergedPlanningData = new HashMap<>(collectedData != null ? collectedData : Map.of());
+        for (AiResponseDto.TemplateDto t : aiResponse.templates()) {
+            if (t.parentKey() == null || !planningParentKeys.contains(t.parentKey())) continue;
+            String k     = t.key()   != null ? t.key().toLowerCase()   : "";
+            String title = t.title() != null ? t.title().toLowerCase() : "";
+            String text  = extractTextContent(t.content());
+            if (text.isBlank()) continue;
+
+            if (k.contains("problem") || k.contains("문제") || title.contains("문제")) {
+                mergedPlanningData.putIfAbsent("problem", text);
+            } else if (k.contains("solution") || k.contains("솔루션") || title.contains("솔루션")) {
+                mergedPlanningData.putIfAbsent("solution", text);
+            } else if (k.contains("persona") || k.contains("페르소나") || title.contains("페르소나")) {
+                mergedPlanningData.putIfAbsent("targetPersona", text);
+            }
+        }
+        log.info("[Planning] AI에서 추출된 기획 데이터 키: {}", mergedPlanningData.keySet());
 
         for (AiResponseDto.TemplateDto template : aiResponse.templates()) {
             try {
@@ -145,7 +167,7 @@ public class NotionService {
                             rootLevelKeys.add(template.key());
                         }
                     } else if (isKeyMatch(template, "기획") || isKeyMatch(template, "PLANNING")) {
-                        createPlanningSubPages(userToken, createdPageId, collectedData);
+                        createPlanningSubPages(userToken, createdPageId, mergedPlanningData);
                     } else if (isKeyMatch(template, "개발") || isKeyMatch(template, "DEVELOPMENT")) {
                         createDevelopmentSubPages(userToken, createdPageId, collectedData);
                     } else if (isKeyMatch(template, "역할별") || isKeyMatch(template, "ROLE_GUIDE") || isKeyMatch(template, "role_guide") || isKeyMatch(template, "가이드")) {
@@ -1032,6 +1054,38 @@ public class NotionService {
                 }
             }
         }
+    }
+
+    /**
+     * AI content(Object)에서 텍스트를 전부 이어붙여 반환합니다.
+     * String이면 그대로, Map이면 value들을 재귀, List면 item들을 줄바꿈으로 연결.
+     */
+    private String extractTextContent(Object content) {
+        if (content == null) return "";
+        if (content instanceof String s) return s.trim();
+        if (content instanceof List<?> list) {
+            StringBuilder sb = new StringBuilder();
+            for (Object item : list) {
+                String part = extractTextContent(item);
+                if (!part.isBlank()) {
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append(part);
+                }
+            }
+            return sb.toString();
+        }
+        if (content instanceof Map<?, ?> map) {
+            StringBuilder sb = new StringBuilder();
+            for (Object val : map.values()) {
+                String part = extractTextContent(val);
+                if (!part.isBlank()) {
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append(part);
+                }
+            }
+            return sb.toString();
+        }
+        return content.toString().trim();
     }
 
     private String extractSummaryLine(Object content) {
