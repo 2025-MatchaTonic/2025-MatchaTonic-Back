@@ -3,6 +3,8 @@ package com.example.MatchaTonic.Back.service;
 import com.example.MatchaTonic.Back.dto.AiResponseDto;
 import com.example.MatchaTonic.Back.dto.MemberDto;
 import com.example.MatchaTonic.Back.dto.NotionOAuthDto;
+import com.example.MatchaTonic.Back.entity.manual.Manual;
+import com.example.MatchaTonic.Back.repository.ManualRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
@@ -29,6 +31,7 @@ import java.util.regex.Pattern;
 public class NotionService {
 
     private final RestTemplate restTemplate;
+    private final ManualRepository manualRepository;
 
     public List<NotionOAuthDto.PageResponse> listAccessiblePages(String token) {
         if (token == null || token.isBlank()) {
@@ -121,6 +124,8 @@ public class NotionService {
                         createPlanningSubPages(userToken, createdPageId, collectedData);
                     } else if (isKeyMatch(template, "개발") || isKeyMatch(template, "DEVELOPMENT")) {
                         createDevelopmentSubPages(userToken, createdPageId, collectedData);
+                    } else if (isKeyMatch(template, "역할별") || isKeyMatch(template, "ROLE_GUIDE") || isKeyMatch(template, "role_guide") || isKeyMatch(template, "가이드")) {
+                        createManualSubPages(userToken, createdPageId, "PLAN");
                     } else if (isKeyMatch(template, "DB") || isKeyMatch(template, "db")) {
                         createDbSchemaDatabase(userToken, createdPageId);
                     }
@@ -419,7 +424,8 @@ public class NotionService {
     }
 
     /**
-     * 개발 페이지 안에 고정 하위 페이지들을 생성합니다.
+     * 개발 페이지 안에 고정 하위 페이지들을 생성하고,
+     * Backend/Frontend 페이지 안에 Manual DB 내용을 하위 페이지로 넣습니다.
      */
     private void createDevelopmentSubPages(String token, String developmentPageId, Map<String, Object> data) {
         String projectName  = asStringFromData(data, "projectName", asStringFromData(data, "title", "프로젝트"));
@@ -429,29 +435,73 @@ public class NotionService {
         String dueDate      = asStringFromData(data, "dueDate", "");
 
         // README.md
-        String readmeContent = "## " + projectName + "\n\n"
-                + (subject.isBlank() ? "" : "### 프로젝트 개요\n" + subject + "\n\n")
-                + (goal.isBlank() ? "" : "### 목표\n" + goal + "\n\n")
-                + (deliverables.isBlank() ? "" : "### 주요 산출물\n" + deliverables + "\n\n")
-                + (dueDate.isBlank() ? "" : "### 마감일\n" + dueDate);
+        String readmeContent = "## 프로젝트 소개\n"
+                + (subject.isBlank() ? "(프로젝트 소개를 입력하세요)" : subject) + "\n\n"
+                + "## 주요 기능\n"
+                + (goal.isBlank() ? "- " : "- " + goal) + "\n\n"
+                + "## 기술 스택\n"
+                + "- Frontend:\n"
+                + "- Backend:\n"
+                + "- Infra / Tools:\n\n"
+                + "## 실행 방법 (How to Run)\n"
+                + "```bash\n# 의존성 설치\nnpm install\n\n# 개발 서버 실행\nnpm run dev\n```\n\n"
+                + "## 폴더 구조\n"
+                + "/\n├─ src\n├─ docs\n└─ README.md\n\n"
+                + "## 기여 방법 (Contribution Guide)\n"
+                + "- 브랜치를 생성하고 PR을 통해 기여해주세요.\n"
+                + (deliverables.isBlank() ? "" : "\n## 주요 산출물\n" + deliverables)
+                + (dueDate.isBlank() ? "" : "\n\n## 마감일\n" + dueDate);
         createPageWithContent(token, developmentPageId, "README.md", "📄", readmeContent);
 
-        // Git Convention (고정 내용)
+        // Git Convention (고정)
         createPageWithContent(token, developmentPageId, "Git Convention", "📄",
                 "## 브랜치 전략\n- main: 배포 브랜치\n- develop: 개발 통합 브랜치\n- feature/{기능명}: 기능 개발\n- fix/{버그명}: 버그 수정\n\n"
                 + "## 커밋 메시지 규칙\n- feat: 새로운 기능\n- fix: 버그 수정\n- docs: 문서 수정\n- style: 코드 포맷\n- refactor: 리팩토링\n- test: 테스트\n- chore: 빌드/설정 변경");
 
-        // PR Template (고정 내용)
+        // PR Template
         createPageWithContent(token, developmentPageId, "PR(Pull Request) Template", "📄",
                 "## 변경 사항\n- \n\n## 관련 이슈\n- closes #\n\n## 테스트 항목\n- [ ] \n\n## 리뷰어에게\n");
 
-        // 버전 관리 정책 (고정 내용)
+        // 버전 관리 정책
         createPageWithContent(token, developmentPageId, "버전 관리 정책 (Versioning)", "📄",
-                "## 버전 형식\n`Major.Minor.Patch` (예: 1.0.0)\n\n- Major: 하위 호환 불가 변경\n- Minor: 하위 호환 기능 추가\n- Patch: 버그 수정");
+                "## 버전 규칙\n"
+                + "vMAJOR.MINOR.PATCH\n\n"
+                + "- MAJOR: 기존 기능과 호환되지 않는 큰 변경\n"
+                + "- MINOR: 기능 추가 (하위 호환 유지)\n"
+                + "- PATCH: 버그 수정, 작은 개선\n\n"
+                + "## 버전 업데이트 기준\n"
+                + "- 기능 추가 → MINOR 증가\n"
+                + "- 버그 수정 → PATCH 증가\n"
+                + "- 구조/정책 변경 → MAJOR 증가\n\n"
+                + "## 릴리즈 메모 작성 규칙\n"
+                + "- 변경 사항 요약\n"
+                + "- 주요 기능 추가 여부\n"
+                + "- 주의사항 (Breaking Change)");
 
-        // Backend / Frontend (빈 페이지)
-        createPageWithContent(token, developmentPageId, "Backend",  "📄", null);
-        createPageWithContent(token, developmentPageId, "Frontend", "📄", null);
+        // Backend 페이지 → Manual DB(BACKEND) 우선, 없으면 하드코딩 템플릿
+        String backendPageId = createPageWithContentAndReturnId(token, developmentPageId, "Backend", "📄", null);
+        if (backendPageId != null) {
+            // BACKEND + DEV(공통) 카테고리 합산
+            List<Manual> backendManuals = new ArrayList<>();
+            backendManuals.addAll(manualRepository.findByTargetAndCategoryContainingOrderByStepOrderAsc("DEV", "BACKEND"));
+            backendManuals.addAll(manualRepository.findByTargetAndCategoryContainingOrderByStepOrderAsc("DEV", "DEV"));
+            if (!backendManuals.isEmpty()) {
+                for (Manual m : backendManuals) createPageWithContent(token, backendPageId, m.getTitle(), "📄", m.getContent());
+            } else {
+                createBackendTemplateSubPages(token, backendPageId);
+            }
+        }
+
+        // Frontend 페이지 → Manual DB(FRONTEND) 우선, 없으면 하드코딩 템플릿
+        String frontendPageId = createPageWithContentAndReturnId(token, developmentPageId, "Frontend", "📄", null);
+        if (frontendPageId != null) {
+            List<Manual> frontendManuals = manualRepository.findByTargetAndCategoryContainingOrderByStepOrderAsc("DEV", "FRONTEND");
+            if (!frontendManuals.isEmpty()) {
+                for (Manual m : frontendManuals) createPageWithContent(token, frontendPageId, m.getTitle(), "📄", m.getContent());
+            } else {
+                createFrontendTemplateSubPages(token, frontendPageId);
+            }
+        }
 
         log.info("개발 하위 페이지 생성 완료");
     }
@@ -494,6 +544,174 @@ public class NotionService {
         } catch (RestClientResponseException e) {
             log.error("하위 페이지 생성 실패 title={} status={}", title, e.getStatusCode());
         }
+    }
+
+    private void createFrontendTemplateSubPages(String token, String parentId) {
+        createPageWithContent(token, parentId, "🧰 기술 스택 & 버전 (Tech Stack)", "📄",
+                "## 🧰 기술 스택 & 버전 (Tech Stack)\n"
+                + "프론트엔드 개발 환경을 명확히 합니다.\n\n"
+                + "- Framework / Library: (예: React 18 / Next.js 14 / Vue 3 등)\n"
+                + "- Language: (예: TypeScript 5.x)\n"
+                + "- State Management: (예: Redux / Zustand / Recoil 등)\n"
+                + "- Styling: (예: CSS Module / Tailwind / Styled-components 등)\n"
+                + "- Build / Tooling: (예: Vite / Webpack / ESLint / Prettier 등)");
+
+        createPageWithContent(token, parentId, "🗂 폴더 구조 (Folder Structure)", "📄",
+                "## 🗂 폴더 구조 (Folder Structure)\n"
+                + "프로젝트 전반 구조를 한눈에 파악할 수 있도록 작성합니다.\n\n"
+                + "src/\n"
+                + " ├─ assets/\n"
+                + " ├─ components/\n"
+                + " ├─ pages/\n"
+                + " ├─ hooks/\n"
+                + " ├─ services/\n"
+                + " ├─ styles/\n"
+                + " ├─ utils/\n"
+                + " └─ main.tsx\n\n"
+                + "(실제 프로젝트 구조에 맞게 수정 가능)");
+
+        createPageWithContent(token, parentId, "🧭 라우팅 맵 (Routing Map)", "📄",
+                "## 🧭 라우팅 맵 (Routing Map)\n"
+                + "주요 화면과 URL 구조를 정의합니다.\n\n"
+                + "| Route | 페이지 설명 | 권한 |\n"
+                + "| / | 메인 페이지 | Public |\n"
+                + "| /login | 로그인 | Public |\n"
+                + "| /dashboard | 대시보드 | Auth |\n"
+                + "| /settings | 설정 | Auth |");
+
+        createPageWithContent(token, parentId, "🔐 환경 변수 가이드 (Environment Variables)", "📄",
+                "## 🔐 환경 변수 가이드 (Environment Variables)\n"
+                + "개발·배포 환경에서 사용하는 환경 변수를 정리합니다.\n\n"
+                + "| 변수명 | 설명 | 사용 환경 |\n"
+                + "| VITE_API_BASE_URL | 백엔드 API 주소 | Dev / Prod |\n"
+                + "| VITE_ENV | 실행 환경 | Dev / Prod |\n\n"
+                + "- .env.local 파일 사용\n"
+                + "- 민감 정보는 Git에 커밋 금지");
+
+        createPageWithContent(token, parentId, "🔗 백엔드 API 연동", "📄",
+                "## 🔗 백엔드 API 연동\n"
+                + "프론트엔드와 백엔드 연동 여부를 명시합니다.\n\n"
+                + "- 연동 여부: ☐ 연동함  ☐ 연동 안 함\n"
+                + "- API Base URL:\n"
+                + "- 연동 방식: (예: REST / GraphQL / WebSocket)\n"
+                + "- 에러 처리 방식:");
+
+        createPageWithContent(token, parentId, "🎨 UX / UI 컴포넌트 관리", "📄",
+                "## 🎨 UX / UI 컴포넌트 관리\n"
+                + "디자인 및 UI 컴포넌트 개발 여부를 관리합니다.\n\n"
+                + "- 디자인 시스템 사용 여부: ☐ 사용  ☐ 미사용\n"
+                + "- 공통 컴포넌트 개발 여부: ☐ O  ☐ X\n"
+                + "- 컴포넌트 관리 방식: ☐ 코드 기반  ☐ 컴포넌트 DB (Notion)");
+    }
+
+    private void createBackendTemplateSubPages(String token, String parentId) {
+        createPageWithContent(token, parentId, "🗂 폴더 구조 (Folder Structure)", "📄",
+                "## 🗂 폴더 구조 (Folder Structure)\n"
+                + "프로젝트 전반 구조를 한눈에 파악할 수 있도록 작성합니다.\n\n"
+                + "src/\n"
+                + " ├─ main/\n"
+                + " │   ├─ java/\n"
+                + " │   │   └─ com/example/project/\n"
+                + " │   │       ├─ controller/\n"
+                + " │   │       ├─ service/\n"
+                + " │   │       ├─ repository/\n"
+                + " │   │       ├─ entity/\n"
+                + " │   │       └─ dto/\n"
+                + " │   └─ resources/\n"
+                + " └─ test/\n\n"
+                + "(실제 프로젝트 구조에 맞게 수정 가능)");
+
+        createPageWithContent(token, parentId, "🌐 도메인 정보 (Domain)", "📄",
+                "## 🌐 도메인 정보 (Domain)\n"
+                + "백엔드 시스템의 논리적 경계와 책임 범위를 정의합니다.\n\n"
+                + "서비스 도메인 이름\n"
+                + "- 도메인 명:\n"
+                + "- 설명: (이 도메인이 담당하는 핵심 기능 요약)\n\n"
+                + "도메인 범위 (Scope)\n"
+                + "- 포함 기능:\n"
+                + "- 제외 기능:");
+
+        createPageWithContent(token, parentId, "🧱 도메인 구성 요소", "📄",
+                "## 🧱 도메인 구성 요소\n"
+                + "주요 비즈니스 개념과 데이터 구조를 정의합니다.\n\n"
+                + "핵심 엔티티 (Entities)\n"
+                + "- Entity 1\n"
+                + "  - 역할:\n"
+                + "  - 주요 속성:\n\n"
+                + "도메인 규칙 (Business Rules)\n"
+                + "- \n- ");
+
+        createPageWithContent(token, parentId, "🔌 API 책임 요약", "📄",
+                "## 🔌 API 책임 요약 (선택)\n"
+                + "이 도메인이 제공하는 API의 책임 범위입니다.\n\n"
+                + "- 주요 API 역할:\n"
+                + "- 외부 연동 여부: ☐ 있음  ☐ 없음\n"
+                + "- 연동 대상:");
+
+        createPageWithContent(token, parentId, "👥 R&R (Roles & Responsibilities)", "📄",
+                "## 👥 R&R (Roles & Responsibilities)\n"
+                + "팀원별 역할과 책임을 명확히 정의합니다.\n\n"
+                + "Backend 담당자\n"
+                + "- 이름:\n"
+                + "- 역할: (예: Backend Lead / API Developer 등)\n\n"
+                + "책임 (Responsibilities)\n"
+                + "- \n- \n- \n\n"
+                + "권한 (Authority)\n"
+                + "- ");
+    }
+
+    /**
+     * Manual DB에서 target에 해당하는 매뉴얼을 가져와 하위 페이지로 생성합니다.
+     */
+    private void createManualSubPages(String token, String parentPageId, String target) {
+        List<Manual> manuals = manualRepository.findByTargetOrderByStepOrderAsc(target);
+        if (manuals.isEmpty()) {
+            log.info("Manual DB에 target={} 데이터 없음", target);
+            return;
+        }
+        for (Manual manual : manuals) {
+            createPageWithContent(token, parentPageId, manual.getTitle(), "📄", manual.getContent());
+        }
+        log.info("Manual 하위 페이지 생성 완료 target={} count={}", target, manuals.size());
+    }
+
+    /**
+     * 페이지를 생성하고 생성된 페이지 ID를 반환합니다.
+     */
+    private String createPageWithContentAndReturnId(String token, String parentId, String title, String emoji, String content) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("parent", Map.of("page_id", parentId));
+        body.put("icon", Map.of("type", "emoji", "emoji", emoji));
+        body.put("properties", Map.of(
+                "title", Map.of("title", List.of(Map.of("text", Map.of("content", title))))
+        ));
+        if (content != null && !content.isBlank()) {
+            List<Map<String, Object>> children = new ArrayList<>();
+            for (String line : content.split("\n")) {
+                if (line.startsWith("## ")) {
+                    children.add(Map.of("object", "block", "type", "heading_2",
+                            "heading_2", Map.of("rich_text", List.of(textObject(line.substring(3))))));
+                } else if (line.startsWith("- ")) {
+                    children.add(createBulletBlock(line.substring(2)));
+                } else if (!line.isBlank()) {
+                    children.add(createParagraphBlock(line));
+                }
+            }
+            if (!children.isEmpty()) body.put("children", children);
+        }
+        try {
+            ResponseEntity<Map> response = restTemplate.postForEntity(
+                    "https://api.notion.com/v1/pages",
+                    new HttpEntity<>(body, createNotionHeaders(token)),
+                    Map.class
+            );
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                return (String) response.getBody().get("id");
+            }
+        } catch (RestClientResponseException e) {
+            log.error("페이지 생성 실패 title={} status={}", title, e.getStatusCode());
+        }
+        return null;
     }
 
     private String asStringFromData(Map<String, Object> data, String key, String defaultValue) {
