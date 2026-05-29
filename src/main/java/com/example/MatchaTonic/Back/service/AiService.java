@@ -59,6 +59,8 @@ public class AiService {
             aiResponse = restTemplate.postForObject(fastApiUrl, aiRequestPayload, AiResponseDto.class);
 
             Map<String, Object> collectedData = projectService.buildCollectedData(project);
+            log.info("collectedData keys: {}", collectedData.keySet());
+            log.info("collectedData values: {}", collectedData);
             notionService.createProjectPagesOnNotion(
                     aiResponse,
                     request.notionToken(),
