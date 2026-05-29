@@ -316,23 +316,42 @@ public class NotionService {
     }
 
     private void addDashboardIntroBlocks(AiResponseDto.TemplateDto template, List<Map<String, Object>> blocks, String projectSubject, String projectSummary, List<MemberDto.InfoResponse> members) {
-        // 최상위 루트 페이지(대시보드)에만 추가되도록 처리 (하위 페이지에는 제외)
-        if (template.parentKey() != null) {
-            return;
+        if (template.parentKey() == null) {
+            addRootPageIntroBlocks(blocks, projectSummary, members);
+        } else if (isKeyMatch(template, "기획")) {
+            addPlanningPageIntroBlocks(blocks, projectSummary);
+        } else if (isKeyMatch(template, "개발")) {
+            addDevPageIntroBlocks(blocks);
         }
+    }
 
-        String titleText = (projectSubject != null && !projectSubject.isBlank()) ? projectSubject : "프로젝트 요약";
+    private boolean isKeyMatch(AiResponseDto.TemplateDto template, String keyword) {
+        return (template.key() != null && template.key().contains(keyword))
+                || (template.title() != null && template.title().contains(keyword));
+    }
+
+    private void addRootPageIntroBlocks(List<Map<String, Object>> blocks, String projectSummary, List<MemberDto.InfoResponse> members) {
         String summaryBody = (projectSummary != null && !projectSummary.isBlank())
                 ? projectSummary
                 : "세부 내용이 등록되지 않았습니다.";
 
-        String title = titleText + "\n\n" + summaryBody;
-        blocks.add(createCalloutBlock(title, "📌", "gray_background"));
-
+        blocks.add(createCalloutBlock(summaryBody, "📌", "gray_background"));
         blocks.add(createHeadingBlock("팀원 정보"));
         blocks.add(createTeamInfoTableBlock(members));
-        blocks.add(createDividerBlock());
-        blocks.add(createCalloutBlock("📂 하위 문서", "기획, 개발, DB 등의 하위 문서는 노션 API 정책 상 이 콜아웃 아래에 [하위 페이지] 형태로 자동 생성됩니다.", "💡", "blue_background"));
+        blocks.add(createCalloutBlock("💬 기획\n🖥️ 개발\n🔵 DB", "📂", "gray_background"));
+        blocks.add(createCalloutBlock("🔗 그라운드룰\n😀 역할별 가이드", "📎", "gray_background"));
+    }
+
+    private void addPlanningPageIntroBlocks(List<Map<String, Object>> blocks, String projectSummary) {
+        String summary = (projectSummary != null && !projectSummary.isBlank())
+                ? projectSummary
+                : "프로젝트 한 줄 소개를 입력하세요.";
+        blocks.add(createCalloutBlock(summary, "📌", "gray_background"));
+    }
+
+    private void addDevPageIntroBlocks(List<Map<String, Object>> blocks) {
+        blocks.add(createCalloutBlock("메뉴얼", "💡", "yellow_background"));
+        blocks.add(createCalloutBlock("Backend\nFrontend", "⌨️", "gray_background"));
     }
 
     private String extractSummaryLine(Object content) {
